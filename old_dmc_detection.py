@@ -40,7 +40,7 @@ class DataMatrixLocator:
 
         processed = cv.bitwise_or(closed_row, closed_column)
 
-        kernel_open = cv.getStructuringElement(cv.MORPH_RECT, (3, 3))
+        kernel_open = cv.getStructuringElement(cv.MORPH_RECT, (7, 7))
         processed = cv.morphologyEx(processed, cv.MORPH_OPEN, kernel_open)
 
         return processed
@@ -208,3 +208,5 @@ def run_webcam():
 
 if __name__ == "__main__":
     run_webcam()
+
+# pip install -r requirements.txt
