@@ -1,5 +1,6 @@
 import cv2 as cv
-from dm_detector.extraction import CandidateExtraction
+from dm_detector import DataMatrixPipeline
+
 
 def main():
     cap = cv.VideoCapture(0)
@@ -10,36 +11,31 @@ def main():
         print("Error: Cannot access webcam")
         return
 
-    extractor = CandidateExtraction(
-        canny_t1 = 100,
-        canny_t2 = 200,
-        min_area = 300,
-        min_perimeter = 80,
-        padding = 10
-    )
+    pipeline = DataMatrixPipeline()
 
-    print("Press 'q' to exit")
+    print("Press 'q' to exit, 'd' to toggle debug view")
+    debug_view = False
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        candidates = extractor.get_candidates(frame)
+        results = pipeline.process_frame(frame)
+        output = pipeline.draw_results(frame, results, debug_view)
 
-        for (x, y, w, h) in candidates:
-            cv.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 1)
+        cv.imshow("Data Matrix Detector", output)
 
-            cv.putText(frame, "Candidate", (x, y - 5),
-                       cv.FONT_HERSHEY_SIMPLEX, 0.25, (0, 0, 255), 1)
-
-        cv.imshow("Data Matrix Detector", frame)
-
-        if cv.waitKey(1) & 0xFF == ord('q'):
+        key = cv.waitKey(1) & 0xFF
+        if key == ord('q'):
             break
+        elif key == ord('d'):
+            debug_view = not debug_view
+            print(f"Debug view: {'ON' if debug_view else 'OFF'}")
 
     cap.release()
     cv.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()
