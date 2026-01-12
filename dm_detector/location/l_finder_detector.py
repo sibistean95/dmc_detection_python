@@ -33,7 +33,7 @@ class LPattern:
         ys = [self.vertex1[1], self.corner[1], self.vertex2[1]]
         x_min, x_max = int(min(xs)), int(max(xs))
         y_min, y_max = int(min(ys)), int(max(ys))
-        return (x_min, y_min, x_max - x_min, y_max - y_min)
+        return x_min, y_min, x_max - x_min, y_max - y_min
 
 
 class LFinderDetector:
@@ -70,10 +70,12 @@ class LFinderDetector:
 
         return segments
 
-    def _distance(self, p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
+    @staticmethod
+    def _distance(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
         return np.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
 
-    def _angle_between_segments(self, seg1: LineSegment, seg2: LineSegment) -> float:
+    @staticmethod
+    def _angle_between_segments(seg1: LineSegment, seg2: LineSegment) -> float:
         angle1 = seg1.angle
         angle2 = seg2.angle
 
@@ -166,7 +168,8 @@ class LFinderDetector:
         segments = self.detect_lines(region)
         return self.find_l_patterns(segments)
 
-    def draw_segments(self, image: np.ndarray, segments: List[LineSegment],
+    @staticmethod
+    def draw_segments(image: np.ndarray, segments: List[LineSegment],
                       color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
         result = image.copy()
         for seg in segments:
@@ -175,7 +178,8 @@ class LFinderDetector:
             cv.line(result, pt1, pt2, color, 1)
         return result
 
-    def draw_l_patterns(self, image: np.ndarray, patterns: List[LPattern],
+    @staticmethod
+    def draw_l_patterns(image: np.ndarray, patterns: List[LPattern],
                         color: Tuple[int, int, int] = (255, 0, 255)) -> np.ndarray:
         result = image.copy()
         for pattern in patterns:

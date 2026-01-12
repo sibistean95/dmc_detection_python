@@ -4,10 +4,10 @@ from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
 from .extraction import CandidateExtraction
-from .location import LFinderDetector, DashedBorderDetector, DataMatrixValidator
-from .location.l_finder_detector import LPattern, LineSegment
-from .location.dashed_border_detector import DataMatrixLocation
+from .location import LFinderDetector, DataMatrixValidator
+from .location.l_finder_detector import LPattern
 from .geometry import BorderFitter, PreciseLocation
+from .location.dashed_border_detector import DashedBorderDetector
 
 
 @dataclass
@@ -39,6 +39,7 @@ class DataMatrixPipeline:
         self.l_finder = LFinderDetector()
         self.validator = DataMatrixValidator()
         self.border_fitter = BorderFitter()
+        self.dashed_detector = DashedBorderDetector()
 
     def process_frame(self, frame: np.ndarray) -> List[DetectionResult]:
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
@@ -46,7 +47,7 @@ class DataMatrixPipeline:
         results = []
 
         for (x, y, w, h) in candidates:
-            region = gray[y:y+h, x:x+w]
+            region = gray[y:y + h, x:x + w]
 
             segments = self.l_finder.detect_lines(region)
             l_patterns = self.l_finder.find_l_patterns(segments)
@@ -57,11 +58,31 @@ class DataMatrixPipeline:
 
             if len(l_patterns) > 0:
                 l_pattern = l_patterns[0]
-                
+
                 validation = self.validator.validate(region, l_pattern)
-                
+
                 if validation.is_valid:
+                    dashed_result = self.dashed_detector.detect(region, l_pattern)
                     precise_location = self.border_fitter.fit(region, l_pattern)
+
+                    if precise_location is None and dashed_result is not None:
+                        bx, by, bw, bh = dashed_result.bounding_box
+
+                        vertices = [
+                            (float(bx), float(by)),
+                            (float(bx + bw), float(by)),
+                            (float(bx + bw), float(by + bh)),
+                            (float(bx), float(by + bh))
+                        ]
+                        center = (float(bx + bw / 2), float(by + bh / 2))
+
+                        precise_location = PreciseLocation(
+                            vertices=vertices,
+                            center=center,
+                            angle=0.0,
+                            size=(float(bw), float(bh))
+                        )
+
                     is_valid = True
                     score = validation.score
 
@@ -73,12 +94,12 @@ class DataMatrixPipeline:
                 score=score
             ))
 
-        valid_results = [r for r in results if r.is_valid]
-        valid_results.sort(key=lambda r: r.score, reverse=True)
-        
-        return valid_results
+        results.sort(key=lambda r: r.score, reverse=True)
 
-    def draw_results(self, frame: np.ndarray, results: List[DetectionResult],
+        return results
+
+    @staticmethod
+    def draw_results(frame: np.ndarray, results: List[DetectionResult],
                      debug_view: bool = False) -> np.ndarray:
         output = frame.copy()
 
@@ -88,7 +109,7 @@ class DataMatrixPipeline:
             if result.precise_location and result.is_valid:
                 vertices = result.precise_location.get_ordered_vertices()
                 abs_vertices = [(v[0] + x, v[1] + y) for v in vertices]
-                
+
                 pts = np.array(abs_vertices, dtype=np.int32)
                 cv.polylines(output, [pts], True, (0, 255, 0), 2)
 

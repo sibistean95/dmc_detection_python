@@ -84,7 +84,8 @@ class BorderFitter:
             size=rect[1]
         )
 
-    def _fit_from_l_pattern(self, l_pattern: LPattern) -> PreciseLocation:
+    @staticmethod
+    def _fit_from_l_pattern(l_pattern: LPattern) -> PreciseLocation:
         corner = np.array(l_pattern.corner)
         v1 = np.array(l_pattern.vertex1)
         v2 = np.array(l_pattern.vertex2)
@@ -117,7 +118,8 @@ class BorderFitter:
             size=(side, side)
         )
 
-    def draw_precise_location(self, image: np.ndarray, 
+    @staticmethod
+    def draw_precise_location(image: np.ndarray,
                               location: PreciseLocation,
                               color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
         result = image.copy()

@@ -1,6 +1,5 @@
 import cv2 as cv
 import numpy as np
-from typing import Optional, Tuple
 from dataclasses import dataclass
 
 from .l_finder_detector import LPattern

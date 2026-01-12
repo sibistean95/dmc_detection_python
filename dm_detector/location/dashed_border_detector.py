@@ -45,13 +45,14 @@ class DashedBorderDetector:
 
         return (upper_x, upper_y, upper_w, upper_h), (right_x, right_y, right_w, right_h)
 
-    def scan_edge_points(self, edge_img: np.ndarray, 
+    @staticmethod
+    def scan_edge_points(edge_img: np.ndarray,
                          region: Tuple[int, int, int, int],
                          direction: str = 'horizontal') -> Tuple[int, int]:
         x, y, w, h = region
 
         if x < 0 or y < 0 or x + w > edge_img.shape[1] or y + h > edge_img.shape[0]:
-            return (0, 0)
+            return 0, 0
 
         roi = edge_img[y:y+h, x:x+w]
 
@@ -61,12 +62,12 @@ class DashedBorderDetector:
             edge_counts = np.sum(roi > 0, axis=0)
 
         if len(edge_counts) == 0:
-            return (0, 0)
+            return 0, 0
 
         dashed_idx = int(np.argmax(edge_counts))
         solid_idx = int(np.argmin(edge_counts))
 
-        return (dashed_idx, solid_idx)
+        return dashed_idx, solid_idx
 
     def detect(self, gray_img: np.ndarray, l_pattern: LPattern) -> Optional[DataMatrixLocation]:
         edges = cv.Canny(gray_img, self.edge_threshold, self.edge_threshold * 2)
@@ -97,7 +98,8 @@ class DashedBorderDetector:
             bounding_box=bounding_box
         )
 
-    def draw_detection_regions(self, image: np.ndarray,
+    @staticmethod
+    def draw_detection_regions(image: np.ndarray,
                                upper_region: Tuple[int, int, int, int],
                                right_region: Tuple[int, int, int, int]) -> np.ndarray:
         result = image.copy()
@@ -110,7 +112,8 @@ class DashedBorderDetector:
 
         return result
 
-    def draw_location(self, image: np.ndarray, 
+    @staticmethod
+    def draw_location(image: np.ndarray,
                       location: DataMatrixLocation,
                       color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
         result = image.copy()
