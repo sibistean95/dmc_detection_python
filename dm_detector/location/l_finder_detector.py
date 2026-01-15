@@ -40,9 +40,9 @@ class LFinderDetector:
 
     def __init__(self,
                  neighborhood_radius: float = 10.0,
-                 min_angle: float = 75.0,
-                 max_angle: float = 105.0,
-                 max_length_ratio: float = 2.0,
+                 min_angle: float = 60.0,
+                 max_angle: float = 120.0,
+                 max_length_ratio: float = 5.0,
                  min_segment_length: float = 20.0):
         self.neighborhood_radius = neighborhood_radius
         self.min_angle = np.radians(min_angle)

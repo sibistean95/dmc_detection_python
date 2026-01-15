@@ -81,7 +81,7 @@ class BorderFitter:
             vertices=vertices,
             center=(rect[0][0], rect[0][1]),
             angle=rect[2],
-            size=rect[1]
+            size=(float(rect[0][1]), float(rect[1][1]))
         )
 
     @staticmethod
