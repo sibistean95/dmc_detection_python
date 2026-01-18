@@ -55,7 +55,14 @@ class LFinderDetector:
         if len(region.shape) == 3:
             region = cv.cvtColor(region, cv.COLOR_BGR2GRAY)
 
-        lines, _, _, _ = self.lsd.detect(region)
+        # aplic clahe local pentru imbunatatirea modelului l
+        clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+        enhanced = clahe.apply(region)
+        
+        # aplic gaussian blur pentru a reduce zgomotul (prezent in structura metalica)
+        blurred = cv.GaussianBlur(enhanced, (5, 5), 0)
+
+        lines, _, _, _ = self.lsd.detect(blurred)
 
         segments = []
         if lines is not None:

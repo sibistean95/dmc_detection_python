@@ -16,8 +16,15 @@ class CandidateExtraction:
         self.min_perimeter = min_perimeter
         self.padding = padding
 
+    def _auto_canny(self, image: np.ndarray, sigma: float = 0.33) -> np.ndarray:
+        v = np.median(image)
+        lower = int(max(0, (1.0 - sigma) * v))
+        upper = int(min(255, (1.0 + sigma) * v))
+        return cv.Canny(image, lower, upper)
+
     def edge_detection(self, image_gray: np.ndarray) -> np.ndarray:
-        return cv.Canny(image_gray, self.canny_t1, self.canny_t2)
+        # foloseste auto-canny in loc de praguri fixe
+        return self._auto_canny(image_gray)
 
     @staticmethod
     def morphological_processing(edges: np.ndarray) -> np.ndarray:
@@ -58,7 +65,11 @@ class CandidateExtraction:
     def get_candidates(self, frame: np.ndarray) -> list:
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
 
-        edges = self.edge_detection(gray)
+        # aplica clahe pentru a imbunatati contrastul (util pentru suprafete metalice/intunecate)
+        clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+
+        edges = self.edge_detection(enhanced)
         preprocess = self.morphological_processing(edges)
         candidates = self.contour_analysis(preprocess, gray.shape)
 

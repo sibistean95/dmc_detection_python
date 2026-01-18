@@ -69,8 +69,18 @@ class DashedBorderDetector:
 
         return dashed_idx, solid_idx
 
+    def _auto_canny(self, image: np.ndarray, sigma: float = 0.33) -> np.ndarray:
+        v = np.median(image)
+        lower = int(max(0, (1.0 - sigma) * v))
+        upper = int(min(255, (1.0 + sigma) * v))
+        # adauga un prag minim pentru a evita zgomotul
+        if lower < 50: lower = 50
+        if upper < 100: upper = 100
+        return cv.Canny(image, lower, upper)
+
     def detect(self, gray_img: np.ndarray, l_pattern: LPattern) -> Optional[DataMatrixLocation]:
-        edges = cv.Canny(gray_img, self.edge_threshold, self.edge_threshold * 2)
+        # foloseste auto-canny in loc de praguri fixe
+        edges = self._auto_canny(gray_img)
 
         upper_region, right_region = self.get_detection_regions(l_pattern, gray_img.shape)
 
