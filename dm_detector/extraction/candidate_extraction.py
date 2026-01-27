@@ -1,3 +1,4 @@
+import cv2
 import cv2 as cv
 import numpy as np
 from typing import List, Tuple
@@ -21,6 +22,7 @@ class CandidateExtraction:
         v = float(np.median(image))
         lower = int(max(0.0, (1.0 - sigma) * v))
         upper = int(min(255.0, (1.0 + sigma) * v))
+        print(f"Canny lower: {lower} upper: {upper}")
         return cv.Canny(image, lower, upper)
 
     def edge_detection(self, image_gray: np.ndarray) -> np.ndarray:
@@ -28,30 +30,57 @@ class CandidateExtraction:
 
     @staticmethod
     def morphological_processing(edges: np.ndarray) -> np.ndarray:
-        kernel_dilate = cv.getStructuringElement(cv.MORPH_RECT, (4, 4))
-        dilated = cv.dilate(edges, kernel_dilate, iterations=1)
+        edges_copy = edges.copy()
+        edges_copy = cv.bitwise_not(edges_copy)
+
+        cv.imshow("edges copy", edges_copy)
+        cv.waitKey(0)
+
+        kernel_dilate = cv.getStructuringElement(cv.MORPH_RECT, (6, 6))
+        dilated = cv.dilate(edges_copy, kernel_dilate, iterations=1)
 
         kernel_open = cv.getStructuringElement(cv.MORPH_RECT, (5, 5))
         processed = cv.morphologyEx(dilated, cv.MORPH_OPEN, kernel_open)
 
+        # processed_inv = cv.bitwise_not(processed)
+
         return processed
 
     def contour_analysis(self, binary_map: np.ndarray, shape: Tuple[int, int]) -> List[Tuple[int, int, int, int]]:
-        contours, _ = cv.findContours(binary_map, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv.findContours(binary_map, cv.RETR_TREE, cv.CHAIN_APPROX_NONE)
         candidate_boxes = []
         img_h, img_w = shape
 
+        bgr_img = cv.cvtColor(binary_map, cv.COLOR_GRAY2BGR)
+
         for contour in contours:
+            output_img = bgr_img.copy()
+            cv.drawContours(output_img, [contour], 0, (0, 255, 0), 2)
+            cv.imshow("contours", output_img)
+            cv.waitKey(0)
+
             perimeter = cv.arcLength(contour, True)
             area = cv.contourArea(contour)
 
+            print(f"Perimeter: {perimeter}, min perimeter: {self.min_perimeter}")
+            print(f"Area: {area}, min area: {self.min_area}")
+
             if perimeter > self.min_perimeter and area > self.min_area:
                 x, y, w, h = cv.boundingRect(contour)
+
+                print(f"x: {x} y: {y} w: {w} h: {h}")
+                print(self.padding)
 
                 x_new = max(0, x - self.padding)
                 y_new = max(0, y - self.padding)
                 w_new = min(img_w - x_new, w + 2 * self.padding)
                 h_new = min(img_h - y_new, h + 2 * self.padding)
+
+                print(f"x_new: {x_new} y_new: {y_new} w_new: {w_new} h_new: {h_new}")
+
+                crop = output_img[y_new:y_new + h_new, x_new:x_new + w_new]
+                cv.imshow("cropped", crop)
+                cv.waitKey(0)
 
                 candidate_boxes.append((x_new, y_new, w_new, h_new))
 
@@ -59,11 +88,25 @@ class CandidateExtraction:
 
     def get_candidates(self, frame: np.ndarray) -> list:
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+        gray = cv.GaussianBlur(gray, (51, 51), 1.8)
+        gray = cv.adaptiveThreshold(
+            gray, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv.THRESH_BINARY, 51, 4
+        )
         clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray)
 
-        edges = self.edge_detection(enhanced)
-        preprocess = self.morphological_processing(edges)
-        candidates = self.contour_analysis(preprocess, gray.shape)
+        preprocess = self.morphological_processing(enhanced)
+
+        cv.imshow("clahe", preprocess)
+        cv.waitKey(0)
+
+        edges = self.edge_detection(preprocess)
+        # preprocess = self.morphological_processing(edges)
+        #
+        # cv.imshow("preprocess", preprocess)
+        # cv.waitKey(0)
+
+        candidates = self.contour_analysis(edges, gray.shape)
 
         return candidates
