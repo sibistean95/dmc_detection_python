@@ -3,7 +3,7 @@ from dm_detector import DataMatrixPipeline
 
 def main():
     # RUN ON IMAGE
-    frame = cv.imread("./test_images/dmc_sample.jpg")
+    frame = cv.imread("./test_images/dmc_on_object_test_image.png")
 
     cv.imshow("image", frame)
     cv.waitKey(0)
