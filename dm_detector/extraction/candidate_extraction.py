@@ -121,7 +121,7 @@ class CandidateExtraction:
         cv.imshow("clahe", preprocess)
         cv.waitKey(0)
 
-        edges = self.edge_detection(preprocess)
+        # edges = self.edge_detection(preprocess)
         # preprocess = self.morphological_processing(edges)
         #
         # cv.imshow("preprocess", preprocess)
