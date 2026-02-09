@@ -110,6 +110,12 @@ class DashedBorderDetector:
         y_start, y_end = right_region[0], right_region[0] + right_region[2]
         right_border = gray_img[y_start:y_end, right_border_x]
 
+        cv.imshow("upper", upper_border)
+        cv.waitKey(0)
+
+        cv.imshow("right", right_border)
+        cv.waitKey(0)
+
         t_upper = self.count_transitions(upper_border)
         t_right = self.count_transitions(right_border)
 

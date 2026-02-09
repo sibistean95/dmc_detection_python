@@ -23,7 +23,7 @@ def main():
 
     if results and results[0].is_valid and debug_view:
         warped = results[0].get_rectified_image(frame)
-        print(f"Warped image: {warped}")
+        # print(f"Warped image: {warped}")
         if warped is not None:
             cv.imshow("Rectified", warped)
             cv.waitKey(0)

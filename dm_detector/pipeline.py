@@ -78,6 +78,10 @@ class DataMatrixPipeline:
                     dashed_result = self.dashed_detector.detect(region, l_pattern)
                     precise_location = self.border_fitter.fit(region, l_pattern, rough_location=dashed_result)
 
+                    l_pattern_frame = self.draw_l_pattern(cv.cvtColor(region, cv.COLOR_GRAY2BGR), l_pattern)
+                    cv.imshow("detected", l_pattern_frame)
+                    cv.waitKey(0)
+
                     if precise_location is None and dashed_result is not None:
                         bx, by, bw, bh = dashed_result.bounding_box
                         vertices = [
@@ -111,6 +115,11 @@ class DataMatrixPipeline:
                 score=score
             ))
 
+            region = frame[y:y + h, x:x + w]
+
+            # cv.imshow("region", region)
+            # cv.waitKey(0)
+
         results.sort(key=lambda r: r.score, reverse=True)
         return results
 
@@ -135,3 +144,14 @@ class DataMatrixPipeline:
                 cv.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 1)
 
         return output
+
+    @staticmethod
+    def draw_l_pattern(frame: np.ndarray, l_pattern: LPattern, color: tuple=(0, 255, 0)):
+        result = frame.copy()
+
+        cv.line(result, (int(l_pattern.vertex1[0]), int(l_pattern.vertex1[1])),
+                (int(l_pattern.corner[0]), int(l_pattern.corner[1])), color, 3)
+        cv.line(result, (int(l_pattern.vertex2[0]), int(l_pattern.vertex2[1])),
+                (int(l_pattern.corner[0]), int(l_pattern.corner[1])), color, 3)
+
+        return result

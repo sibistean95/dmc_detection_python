@@ -62,8 +62,8 @@ class CandidateExtraction:
         for i, contour in enumerate(contours):
             output_img = bgr_img.copy()
             cv.drawContours(output_img, [contour], 0, (0, 255, 0), 2)
-            cv.imshow("contours", output_img)
-            cv.waitKey(0)
+            # cv.imshow("contours", output_img)
+            # cv.waitKey(0)
 
             perimeter = cv.arcLength(contour, True)
             area = cv.contourArea(contour)
@@ -96,8 +96,8 @@ class CandidateExtraction:
                 print(f"x_new: {x_new} y_new: {y_new} w_new: {w_new} h_new: {h_new}")
 
                 crop = output_img[y_new:y_new + h_new, x_new:x_new + w_new]
-                cv.imshow("cropped", crop)
-                cv.waitKey(0)
+                # cv.imshow("cropped", crop)
+                # cv.waitKey(0)
 
                 candidate_boxes.append((x_new, y_new, w_new, h_new))
             else:
@@ -108,10 +108,10 @@ class CandidateExtraction:
 
     def get_candidates(self, frame: np.ndarray) -> list:
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-        gray = cv.GaussianBlur(gray, (51, 51), 1.8)
+        gray = cv.GaussianBlur(gray, (65, 65), 1.8)
         gray = cv.adaptiveThreshold(
             gray, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv.THRESH_BINARY, 51, 4
+            cv.THRESH_BINARY, 65, 4
         )
         clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray)
