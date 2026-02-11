@@ -28,14 +28,14 @@ class DashedBorderDetector:
         img_h, img_w = img_shape
 
         upper_x = max(0, int(x1 - tau))
-        upper_y = max(0, int(y1 - tau - (len1 - len2)))
+        upper_y = max(0, int(y1 - tau))
         upper_w = min(img_w - upper_x, int(len1 + 2 * tau))
-        upper_h = min(img_h - upper_y, int(len1 - len2 + 2 * tau))
+        upper_h = min(img_h - upper_y, int(abs(len1 - len2) + 2 * tau))
 
         right_x = min(img_w - 1, int(x3 + tau))
         right_y = max(0, int(y3 - tau))
-        right_w = min(img_w - right_x, int(len1 - len2 + 2 * tau))
-        right_h = min(img_h - right_y, int(len1 + 2 * tau))
+        right_w = min(img_w - right_x, int(abs(len1 - len2) + 2 * tau))
+        right_h = min(img_h - right_y, int(len2 + 2 * tau))
 
         upper_w = max(1, upper_w)
         upper_h = max(1, upper_h)
@@ -110,6 +110,7 @@ class DashedBorderDetector:
         y_start, y_end = right_region[0], right_region[0] + right_region[2]
         right_border = gray_img[y_start:y_end, right_border_x]
 
+        # upscale upper_border, right_border
         cv.imshow("upper", upper_border)
         cv.waitKey(0)
 

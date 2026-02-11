@@ -45,7 +45,7 @@ class LFinderDetector:
         self.max_angle = np.radians(max_angle)
         self.max_length_ratio = max_length_ratio
         self.min_segment_length = min_segment_length
-        self.lsd = cv.createLineSegmentDetector(cv.LSD_REFINE_STD)
+        self.lsd = cv.createLineSegmentDetector(cv.LSD_REFINE_NONE)
 
     def detect_lines(self, region: np.ndarray) -> List[LineSegment]:
         if len(region.shape) == 3:

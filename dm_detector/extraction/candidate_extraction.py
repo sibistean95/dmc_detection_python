@@ -95,7 +95,7 @@ class CandidateExtraction:
 
                 print(f"x_new: {x_new} y_new: {y_new} w_new: {w_new} h_new: {h_new}")
 
-                crop = output_img[y_new:y_new + h_new, x_new:x_new + w_new]
+                # crop = output_img[y_new:y_new + h_new, x_new:x_new + w_new]
                 # cv.imshow("cropped", crop)
                 # cv.waitKey(0)
 
