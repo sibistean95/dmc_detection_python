@@ -107,10 +107,9 @@ class DashedBorderDetector:
         x_start, x_end = upper_region[0], upper_region[0] + upper_region[2]
         upper_border = gray_img[upper_border_y, x_start:x_end]
 
-        y_start, y_end = right_region[0], right_region[0] + right_region[2]
+        y_start, y_end = right_region[1], right_region[1] + right_region[3]
         right_border = gray_img[y_start:y_end, right_border_x]
 
-        # upscale upper_border, right_border
         cv.imshow("upper", upper_border)
         cv.waitKey(0)
 

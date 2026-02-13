@@ -3,7 +3,7 @@ from dm_detector import DataMatrixPipeline
 
 def main():
     # RUN ON IMAGE
-    frame = cv.imread("./test_images/dmc_sample.jpg")
+    frame = cv.imread("./test_images/dmc_on_object_test_image.png")
 
     cv.imshow("image", frame)
     cv.waitKey(0)
@@ -23,7 +23,6 @@ def main():
 
     if results and results[0].is_valid and debug_view:
         warped = results[0].get_rectified_image(frame)
-        # print(f"Warped image: {warped}")
         if warped is not None:
             cv.imshow("Rectified", warped)
             cv.waitKey(0)
@@ -32,6 +31,7 @@ def main():
     cv.waitKey(0)
 
     # RUN ON CAMERA
+
     # cap = cv.VideoCapture(0)
     # cap.set(cv.CAP_PROP_FRAME_WIDTH, 640)
     # cap.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
@@ -65,7 +65,6 @@ def main():
 
     # cap.release()
     cv.destroyAllWindows()
-
 
 if __name__ == "__main__":
     main()

@@ -43,8 +43,6 @@ class CandidateExtraction:
         kernel_open = cv.getStructuringElement(cv.MORPH_RECT, (5, 5))
         processed = cv.morphologyEx(dilated, cv.MORPH_OPEN, kernel_open)
 
-        # processed_inv = cv.bitwise_not(processed)
-
         return processed
 
     def contour_analysis(self, binary_map: np.ndarray, shape: Tuple[int, int]) -> List[Tuple[int, int, int, int]]:
@@ -62,8 +60,6 @@ class CandidateExtraction:
         for i, contour in enumerate(contours):
             output_img = bgr_img.copy()
             cv.drawContours(output_img, [contour], 0, (0, 255, 0), 2)
-            # cv.imshow("contours", output_img)
-            # cv.waitKey(0)
 
             perimeter = cv.arcLength(contour, True)
             area = cv.contourArea(contour)
@@ -95,10 +91,6 @@ class CandidateExtraction:
 
                 print(f"x_new: {x_new} y_new: {y_new} w_new: {w_new} h_new: {h_new}")
 
-                # crop = output_img[y_new:y_new + h_new, x_new:x_new + w_new]
-                # cv.imshow("cropped", crop)
-                # cv.waitKey(0)
-
                 candidate_boxes.append((x_new, y_new, w_new, h_new))
             else:
                 if child_count < self.min_children and (perimeter > self.min_perimeter or area > self.min_area):
@@ -120,12 +112,6 @@ class CandidateExtraction:
 
         cv.imshow("clahe", preprocess)
         cv.waitKey(0)
-
-        # edges = self.edge_detection(preprocess)
-        # preprocess = self.morphological_processing(edges)
-        #
-        # cv.imshow("preprocess", preprocess)
-        # cv.waitKey(0)
 
         candidates = self.contour_analysis(preprocess, gray.shape)
 

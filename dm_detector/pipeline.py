@@ -17,20 +17,34 @@ class DetectionResult:
     is_valid: bool
     score: float
 
-    def get_rectified_image(self, full_frame: np.ndarray, output_size: int = 100) -> Optional[np.ndarray]:
-        if not self.precise_location:
+    def get_rectified_image(self, full_frame: np.ndarray, output_size: int = 200) -> Optional[np.ndarray]:
+        if not self.precise_location or not self.l_patterns:
             return None
 
-        src_pts = np.array(self.precise_location.vertices, dtype=np.float32)
+        l_pat = self.l_patterns[0]
+
         dst_pts = np.array([
-            [0, 0],
-            [output_size - 1, 0],
+            [0, output_size - 1],
             [output_size - 1, output_size - 1],
-            [0, output_size - 1]
+            [output_size - 1, 0],
+            [0, 0]
         ], dtype=np.float32)
 
-        M = cv.getPerspectiveTransform(src_pts, dst_pts)
+        cx, cy, _, _ = self.candidate_box
 
+        src_corner = np.array([l_pat.corner[0] + cx, l_pat.corner[1] + cy])
+        src_v1 = np.array([l_pat.vertex1[0] + cx, l_pat.vertex1[1] + cy])
+        src_v2 = np.array([l_pat.vertex2[0] + cx, l_pat.vertex2[1] + cy])
+        src_v3 = src_v1 + src_v2 - src_corner
+
+        ordered_src = np.array([
+            src_corner,
+            src_v1,
+            src_v3,
+            src_v2
+        ], dtype=np.float32)
+
+        M = cv.getPerspectiveTransform(ordered_src, dst_pts)
         return cv.warpPerspective(full_frame, M, (output_size, output_size))
 
 class DataMatrixPipeline:
@@ -40,7 +54,7 @@ class DataMatrixPipeline:
                  canny_t2: int = 150,
                  min_area: float = 400.0,
                  min_perimeter: float = 80.0,
-                 padding: int = 10):
+                 padding: int = 25):
 
         self.extractor = CandidateExtraction(
             canny_t1=canny_t1,
@@ -115,7 +129,7 @@ class DataMatrixPipeline:
                 score=score
             ))
 
-            region = frame[y:y + h, x:x + w]
+            # region = frame[y:y + h, x:x + w]
 
             # cv.imshow("region", region)
             # cv.waitKey(0)
