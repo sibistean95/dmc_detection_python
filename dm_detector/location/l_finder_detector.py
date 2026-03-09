@@ -71,6 +71,7 @@ class LFinderDetector:
                     p1=(float(x1), float(y1)),
                     p2=(float(x2), float(y2))
                 )
+                # print(f"CURRENT SEGMENT LENGTH: {segment.length}")
                 if self.min_segment_length <= segment.length <= self.max_segment_length:
                     segments.append(segment)
 

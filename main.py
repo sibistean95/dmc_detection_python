@@ -53,9 +53,9 @@ def main():
                 print(f"alternation validation score: {score:.2f}")
 
                 if score > 0.8:
-                    print("good score")
+                    print("good score\n")
                 elif score < 0.6:
-                    print("bad score")
+                    print("bad score\n")
 
                 sampler = ModuleSampler()
 

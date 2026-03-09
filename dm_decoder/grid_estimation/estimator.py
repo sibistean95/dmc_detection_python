@@ -57,7 +57,6 @@ class GridEstimator:
 
         p2 = prof.reshape(1, -1)
         trend = cv.GaussianBlur(p2, ksize=(0, 0), sigmaX=self.hp_sigma, borderType=cv.BORDER_REPLICATE).reshape(-1)
-        # sa vad rezultatele pentru debug
         hp = prof - trend
 
         s = hp.std()
@@ -69,7 +68,6 @@ class GridEstimator:
     @staticmethod
     def _autocorr(hp: np.ndarray) -> np.ndarray:
         r = np.correlate(hp, hp, mode='full').astype(np.float32)
-        # sa vad rezultatul pentru debug
         mid = len(r) // 2
         r = r[mid:]
 
@@ -107,6 +105,3 @@ class GridEstimator:
         transitions = np.sum(bits[1:] != bits[:-1])
 
         return transitions / max(1, (len(bits) - 1))
-
-# impartire pe grid si desenarea lor pe cod data matrix pentru vizualizare
-# extragerea datelor (impartirea modulelor alb si negru in biti 0 si 1)
