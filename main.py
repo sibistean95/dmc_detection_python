@@ -2,6 +2,7 @@ import cv2 as cv
 from dm_detector.pipeline import DataMatrixPipeline
 from dm_decoder.grid_estimation.estimator import GridEstimator
 from dm_decoder.sampling.sampler import ModuleSampler
+from dm_decoder.mapping.utah_mapping import UtahMapper
 
 def snap_to_valid_size(estimated_n: int) -> int:
     valid_sizes = [10, 12, 14, 16, 18, 20, 22, 24, 26, 32, 36, 40, 44, 48, 52, 64, 72, 80, 88, 96, 104, 120, 132, 144]
@@ -77,6 +78,14 @@ def main():
                 for row in data_matrix:
                     row_str = "".join(["1 " if val == 1 else "0 " for val in row])
                     print(row_str)
+
+                print("UTAH MAPPING TEST")
+                mapper = UtahMapper()
+
+                codewords = mapper.map_to_codewords(data_matrix)
+
+                print(f"extracted {len(codewords)} total codewords (bytes)")
+                print(f"raw data bytes: {codewords}")
             else:
                 print("could not estimate pitch")
 
