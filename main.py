@@ -79,7 +79,7 @@ def main():
                     row_str = "".join(["1 " if val == 1 else "0 " for val in row])
                     print(row_str)
 
-                print("UTAH MAPPING TEST")
+                print("\nUTAH MAPPING TEST")
                 mapper = UtahMapper()
 
                 codewords = mapper.map_to_codewords(data_matrix)
