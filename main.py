@@ -3,13 +3,14 @@ from dm_detector.pipeline import DataMatrixPipeline
 from dm_decoder.grid_estimation.estimator import GridEstimator
 from dm_decoder.sampling.sampler import ModuleSampler
 from dm_decoder.mapping.utah_mapping import UtahMapper
+from dm_decoder.decoding.decoder import DataMatrixDecoder
 
 def snap_to_valid_size(estimated_n: int) -> int:
     valid_sizes = [10, 12, 14, 16, 18, 20, 22, 24, 26, 32, 36, 40, 44, 48, 52, 64, 72, 80, 88, 96, 104, 120, 132, 144]
     return min(valid_sizes, key=lambda x: abs(x - estimated_n))
 
 def main():
-    image_path = "./test_images/dmc_sample2.jpeg"
+    image_path = "./test_images/dmc_sample3.png"
     frame = cv.imread(image_path)
 
     if frame is None:
@@ -86,6 +87,14 @@ def main():
 
                 print(f"extracted {len(codewords)} total codewords (bytes)")
                 print(f"raw data bytes: {codewords}")
+
+                print("\nREED SOLOMON ERROR CORRECTION TEST")
+
+                decoder = DataMatrixDecoder()
+
+                final_text = decoder.decode(codewords)
+
+                print(f"final text extraction from data matrix code: {final_text}")
             else:
                 print("could not estimate pitch")
 

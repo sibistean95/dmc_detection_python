@@ -49,7 +49,7 @@ class UtahMapper:
         print(f"[{b0}] [{b1}]")
         print(f"[{b2}] [{b3}] [{b4}]")
         print(f"[{b5}] [{b6}] [{b7}]")
-        print(f"Value: {byte_val} (ASCII : {chr(byte_val - 1) if 1 < byte_val <= 128 else 'N/A'})\n")
+        print(f"Value: {byte_val}\n")
 
         return byte_val
 
