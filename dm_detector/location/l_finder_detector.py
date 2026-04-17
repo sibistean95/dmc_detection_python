@@ -26,12 +26,24 @@ class LPattern:
     len2: float
     score: float = 0.0
 
-    def get_bounding_box(self) -> Tuple[int, int, int, int]:
-        xs = [self.vertex1[0], self.corner[0], self.vertex2[0]]
-        ys = [self.vertex1[1], self.corner[1], self.vertex2[1]]
-        x_min, x_max = int(min(xs)), int(max(xs))
-        y_min, y_max = int(min(ys)), int(max(ys))
-        return x_min, y_min, x_max - x_min, y_max - y_min
+    def get_bounding_box(self, padding: int = 0) -> Tuple[int, int, int, int]:
+        # xs = [self.vertex1[0], self.corner[0], self.vertex2[0]]
+        # ys = [self.vertex1[1], self.corner[1], self.vertex2[1]]
+
+        fourth_corner_x = self.vertex1[0] + self.vertex2[0] - self.corner[0]
+        fourth_corner_y = self.vertex1[1] + self.vertex2[1] - self.corner[1]
+        pts = np.array([self.vertex1, self.vertex2, self.corner, (fourth_corner_x, fourth_corner_y)], dtype=np.float32)
+        x, y, w, h = cv.boundingRect(pts.astype(np.int32))
+
+        if padding != 0:
+            x = x - padding
+            y = y - padding
+            w = w + padding
+            h = h + padding
+
+        # x_min, x_max = int(min(xs)), int(max(xs))
+        # y_min, y_max = int(min(ys)), int(max(ys))
+        return x, y, w, h
 
 class LFinderDetector:
     def __init__(self,
@@ -71,7 +83,6 @@ class LFinderDetector:
                     p1=(float(x1), float(y1)),
                     p2=(float(x2), float(y2))
                 )
-                # print(f"CURRENT SEGMENT LENGTH: {segment.length}")
                 if self.min_segment_length <= segment.length <= self.max_segment_length:
                     segments.append(segment)
 

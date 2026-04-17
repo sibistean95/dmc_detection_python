@@ -10,7 +10,7 @@ def snap_to_valid_size(estimated_n: int) -> int:
     return min(valid_sizes, key=lambda x: abs(x - estimated_n))
 
 def main():
-    image_path = "./test_images/dmc_sample3.png"
+    image_path = "./test_images/dmc_sample2.jpeg"
     frame = cv.imread(image_path)
 
     if frame is None:
