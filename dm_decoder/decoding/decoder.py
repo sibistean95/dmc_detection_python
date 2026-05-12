@@ -30,6 +30,12 @@ class DataMatrixDecoder:
         self.SHIFT3_TEXT = ["`", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q",
                             "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "{", "|", "}", "~", "<DEL>"]
 
+        self.X12_BASIC = [
+            "\r", "*", ">", " ", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
+        ]
+
     def correct_errors(self, total_cw, codewords: bytes) -> bytes:
         if total_cw not in self.ec_table:
             print(f"Unknown length ({total_cw} codeworks)")
@@ -49,10 +55,11 @@ class DataMatrixDecoder:
             return b""
 
     def decode_ascii_scheme(self, data_bytes: list) -> str:
-        MODE_ASCII, MODE_C40, MODE_TEXT = "ASCII", "C40", "TEXT"
+        MODE_ASCII, MODE_C40, MODE_TEXT, MODE_X12 = "ASCII", "C40", "TEXT", "X12"
 
         current_mode = MODE_ASCII
         shift_state = 0
+        high_bit_flag = False
         decoded_text = ""
         i = 0
 
@@ -65,6 +72,8 @@ class DataMatrixDecoder:
                 elif byte == 230:
                     current_mode = MODE_C40
                     shift_state = 0
+                elif byte == 238:
+                    current_mode = MODE_X12
                 elif byte == 239:
                     current_mode = MODE_TEXT
                     shift_state = 0
@@ -72,6 +81,10 @@ class DataMatrixDecoder:
                     pass
                 elif 1 <= byte <= 128:
                     char_val = byte - 1
+                    if high_bit_flag:
+                        char_val += 128
+                        high_bit_flag = False
+
                     if char_val < 32:
                         if char_val == 29:
                             decoded_text += "<GS>"
@@ -88,7 +101,7 @@ class DataMatrixDecoder:
 
                 i += 1
 
-            elif current_mode in (MODE_C40, MODE_TEXT):
+            elif current_mode in (MODE_C40, MODE_TEXT, MODE_X12):
                 if byte == 254:
                     current_mode = MODE_ASCII
                     shift_state = 0
@@ -109,6 +122,19 @@ class DataMatrixDecoder:
                 C3 = remainder % 40
 
                 for c in [C1, C2, C3]:
+                    if current_mode == MODE_X12:
+                        if c == 0:
+                            decoded_text += "\r"
+                        elif c == 1:
+                            decoded_text += "*"
+                        elif c == 2:
+                            decoded_text += ">"
+                        elif c == 3:
+                            decoded_text += " "
+                        elif c < len(self.X12_BASIC):
+                            decoded_text += self.X12_BASIC[c]
+                        continue
+
                     if shift_state == 0:
                         if c == 0:
                             shift_state = 1
@@ -119,13 +145,32 @@ class DataMatrixDecoder:
                         elif c == 3:
                             decoded_text += " "
                         else:
-                            decoded_text += self.C40_BASIC[c] if current_mode == MODE_C40 else self.TEXT_BASIC[c]
+                            char_to_add = self.C40_BASIC[c] if current_mode == MODE_C40 else self.TEXT_BASIC[c]
+                            if high_bit_flag:
+                                char_to_add = chr(ord(char_to_add) + 128)
+                                high_bit_flag = False
+                            decoded_text += char_to_add
+
                     elif shift_state == 1:
-                        decoded_text += chr(c)
+                        if c == 29:
+                            decoded_text += "<GS>"
+                        elif c == 30:
+                            decoded_text += "<RS>"
+                        elif c == 4:
+                            decoded_text += "<EOT>"
+                        elif c < 32:
+                            decoded_text += f"<CTRL_{c}>"
+                        else:
+                            decoded_text += chr(c)
                         shift_state = 0
+
                     elif shift_state == 2:
-                        if c < len(self.SHIFT2_CHARS): decoded_text += self.SHIFT2_CHARS[c]
+                        if c == 30:
+                            high_bit_flag = True
+                        elif c < len(self.SHIFT2_CHARS):
+                            decoded_text += self.SHIFT2_CHARS[c]
                         shift_state = 0
+
                     elif shift_state == 3:
                         if current_mode == MODE_C40:
                             decoded_text += self.SHIFT3_C40[c]

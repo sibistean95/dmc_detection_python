@@ -27,9 +27,11 @@ def main():
         warped_bgr = results[0].get_rectified_image(frame, output_size=400)
 
         if warped_bgr is not None:
+            clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            warped_bgr = clahe.apply(cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY))
             cv.imshow("2. rectified image (warped)", warped_bgr)
 
-            warp_gray = cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY)
+            warp_gray = warped_bgr
 
             print("\ngrid estimator test:\n")
 
