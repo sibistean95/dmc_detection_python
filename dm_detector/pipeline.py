@@ -21,27 +21,40 @@ class DetectionResult:
         if not self.precise_location or not self.l_patterns:
             return None
 
-        l_pat = self.l_patterns[0]
+        vertices = np.array(self.precise_location.vertices, dtype=np.float32)
+
+        cx, cy, _, _ = self.candidate_box
+        l_corner_global = np.array(self.l_patterns[0].corner) + [cx, cy]
+        corner_idx = int(np.argmin(np.linalg.norm(vertices - l_corner_global, axis=1)))
+
+        v_adj1 = vertices[(corner_idx + 1) % 4]
+        v_diag = vertices[(corner_idx + 2) % 4]
+        v_adj2 = vertices[(corner_idx + 3) % 4]
+
+        vec1 = v_adj1 - vertices[corner_idx]
+        vec2 = v_adj2 - vertices[corner_idx]
+
+        cross_prod = vec1[0] * vec2[1] - vec1[1] * vec2[0]
+
+        if cross_prod < 0:
+            horiz_v = v_adj1
+            vert_v = v_adj2
+        else:
+            horiz_v = v_adj2
+            vert_v = v_adj1
+
+        ordered_src = np.array([
+            vertices[corner_idx],
+            horiz_v,
+            v_diag,
+            vert_v
+        ], dtype=np.float32)
 
         dst_pts = np.array([
             [0, output_size - 1],
             [output_size - 1, output_size - 1],
             [output_size - 1, 0],
             [0, 0]
-        ], dtype=np.float32)
-
-        cx, cy, _, _ = self.candidate_box
-
-        src_corner = np.array([l_pat.corner[0] + cx, l_pat.corner[1] + cy])
-        src_v1 = np.array([l_pat.vertex1[0] + cx, l_pat.vertex1[1] + cy])
-        src_v2 = np.array([l_pat.vertex2[0] + cx, l_pat.vertex2[1] + cy])
-        src_v3 = src_v1 + src_v2 - src_corner
-
-        ordered_src = np.array([
-            src_corner,
-            src_v1,
-            src_v3,
-            src_v2
         ], dtype=np.float32)
 
         M = cv.getPerspectiveTransform(ordered_src, dst_pts)
@@ -69,65 +82,73 @@ class DataMatrixPipeline:
         self.border_fitter = BorderFitter()
         self.dashed_detector = DashedBorderDetector()
 
+    @staticmethod
+    def parent_visited(visited: list, current: tuple):
+        for v in visited:
+            if current[0] >= v[0] and current[1] >= v[1] and current[2] <= v[2] and current[3] <= v[3]:
+                return True
+        return False
+
     def process_frame(self, frame: np.ndarray) -> List[DetectionResult]:
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
         candidates = self.extractor.get_candidates(frame)
         results = []
 
+        visited_candidates = []
+
+        candidates.sort(reverse=True, key=lambda c: c[2] * c[3])
+
         for (x, y, w, h) in candidates:
-            region = gray[y:y + h, x:x + w]
+            region = np.ascontiguousarray(gray[y:y + h, x:x + w])
+
+            if self.parent_visited(visited_candidates, (x, y, x + w, y + h)):
+                continue
+            visited_candidates.append((x, y, x + w, y + h))
 
             segments = self.l_finder.detect_lines(region)
-            l_patterns = self.l_finder.find_l_patterns(segments)
+            l_patterns = self.l_finder.find_l_patterns(region, segments)
 
-            precise_location = None
-            is_valid = False
-            score = 0.0
-
-            if len(l_patterns) > 0:
-                l_pattern = l_patterns[0]
+            for idx, l_pattern in enumerate(l_patterns):
                 validation = self.validator.validate(region, l_pattern)
 
-                if validation.is_valid:
-                    dashed_result = self.dashed_detector.detect(region, l_pattern)
-                    precise_location = self.border_fitter.fit(region, l_pattern, rough_location=dashed_result)
+                if not validation.is_valid:
+                    continue
 
-                    l_pattern_frame = self.draw_l_pattern(cv.cvtColor(region, cv.COLOR_GRAY2BGR), l_pattern)
-                    cv.imshow("detected", l_pattern_frame)
-                    cv.waitKey(0)
+                dashed_result, edges = self.dashed_detector.detect(region, l_pattern)
 
-                    if precise_location is None and dashed_result is not None:
-                        bx, by, bw, bh = dashed_result.bounding_box
-                        vertices = [
-                            (float(bx), float(by)),
-                            (float(bx + bw), float(by)),
-                            (float(bx + bw), float(by + bh)),
-                            (float(bx), float(by + bh))
-                        ]
-                        center = (float(bx + bw / 2), float(by + bh / 2))
+                if dashed_result is None:
+                    continue
 
-                        precise_location = PreciseLocation(
-                            vertices=vertices,
-                            center=center,
-                            angle=0.0,
-                            size=(float(bw), float(bh))
-                        )
+                precise_location = self.border_fitter.fit(region, edges, l_pattern, rough_location=dashed_result)
 
-                    if precise_location:
-                        global_vertices = [(vx + x, vy + y) for vx, vy in precise_location.vertices]
-                        precise_location.vertices = global_vertices
-                        precise_location.center = (precise_location.center[0] + x, precise_location.center[1] + y)
+                if precise_location is None:
+                    bx, by, bw, bh = dashed_result.bounding_box
+                    vertices = [
+                        (float(bx), float(by)),
+                        (float(bx + bw), float(by)),
+                        (float(bx + bw), float(by + bh)),
+                        (float(bx), float(by + bh))
+                    ]
+                    center = (float(bx + bw / 2), float(by + bh / 2))
 
-                    is_valid = True
-                    score = validation.score
+                    precise_location = PreciseLocation(
+                        vertices=vertices,
+                        center=center,
+                        angle=0.0,
+                        size=(float(bw), float(bh))
+                    )
 
-            results.append(DetectionResult(
-                candidate_box=(x, y, w, h),
-                precise_location=precise_location,
-                l_patterns=l_patterns,
-                is_valid=is_valid,
-                score=score
-            ))
+                global_vertices = [(vx + x, vy + y) for vx, vy in precise_location.vertices]
+                precise_location.vertices = global_vertices
+                precise_location.center = (precise_location.center[0] + x, precise_location.center[1] + y)
+
+                results.append(DetectionResult(
+                    candidate_box=(x, y, w, h),
+                    precise_location=precise_location,
+                    l_patterns=[l_pattern],
+                    is_valid=True,
+                    score=validation.score
+                ))
 
         results.sort(key=lambda r: r.score, reverse=True)
         return results
@@ -138,8 +159,6 @@ class DataMatrixPipeline:
         output = frame.copy()
 
         for result in results:
-            x, y, w, h = result.candidate_box
-
             if result.precise_location and result.is_valid:
                 vertices = result.precise_location.get_ordered_vertices()
                 pts = np.array(vertices, dtype=np.int32)
@@ -147,20 +166,6 @@ class DataMatrixPipeline:
 
                 if debug_view:
                     cx, cy = int(result.precise_location.center[0]), int(result.precise_location.center[1])
-                    cv.circle(output, (cx, cy), 3, (255, 0, 0), -1)
-
-            elif debug_view:
-                cv.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 1)
+                    cv.circle(output, (cx, cy), 10, (255, 0, 0), -1)
 
         return output
-
-    @staticmethod
-    def draw_l_pattern(frame: np.ndarray, l_pattern: LPattern, color: tuple=(0, 255, 0)):
-        result = frame.copy()
-
-        cv.line(result, (int(l_pattern.vertex1[0]), int(l_pattern.vertex1[1])),
-                (int(l_pattern.corner[0]), int(l_pattern.corner[1])), color, 3)
-        cv.line(result, (int(l_pattern.vertex2[0]), int(l_pattern.vertex2[1])),
-                (int(l_pattern.corner[0]), int(l_pattern.corner[1])), color, 3)
-
-        return result

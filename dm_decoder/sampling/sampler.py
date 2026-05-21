@@ -17,21 +17,30 @@ class ModuleSampler:
             x += horizontal_pitch
 
     @staticmethod
-    def get_matrix_data(image: np.ndarray, horizontal_pitch: float, vertical_pitch: float, rows: int, cols: int) -> np.ndarray:
+    def get_matrix_data(image: np.ndarray, horizontal_pitch: float, vertical_pitch: float, rows: int,
+                        cols: int) -> np.ndarray:
         result = np.zeros(shape=(rows - 2, cols - 2), dtype=np.uint8)
+
+        threshold = np.mean(image)
+
+        corner_module = image[int((rows - 1) * vertical_pitch):, 0:int(horizontal_pitch)]
+        l_median = np.median(corner_module) if corner_module.size > 0 else 0
+
+        is_inverted = l_median > threshold
 
         for y in range(1, rows - 1):
             for x in range(1, cols - 1):
                 module = image[int(y * vertical_pitch):int(y * vertical_pitch + vertical_pitch),
-                                int(x * horizontal_pitch):int(x * horizontal_pitch + horizontal_pitch)]
+                int(x * horizontal_pitch):int(x * horizontal_pitch + horizontal_pitch)]
 
                 if module.size == 0:
                     continue
 
                 median = np.median(module)
-                if median > 150:
-                    result[y - 1][x - 1] = 0
+
+                if is_inverted:
+                    result[y - 1][x - 1] = 1 if median > threshold else 0
                 else:
-                    result[y - 1][x - 1] = 1
+                    result[y - 1][x - 1] = 1 if median < threshold else 0
 
         return result

@@ -1,6 +1,6 @@
 import cv2 as cv
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 from dataclasses import dataclass
 
 from .l_finder_detector import LPattern
@@ -11,6 +11,9 @@ class DataMatrixLocation:
     upper_border: Tuple[int, int, int, int]
     right_border: Tuple[int, int, int, int]
     bounding_box: Tuple[int, int, int, int]
+    quads: Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int]]
+    upper_outer_coords: List[Tuple[int, int]]
+    right_outer_coords: List[Tuple[int, int]]
 
 class DashedBorderDetector:
 
@@ -20,67 +23,150 @@ class DashedBorderDetector:
         self.min_transitions = min_transitions
 
     def get_detection_regions(self, l_pattern: LPattern,
-                              img_shape: Tuple[int, int]) -> Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]:
-        x1, y1 = l_pattern.vertex1
-        x3, y3 = l_pattern.vertex2
-        len1, len2 = l_pattern.len1, l_pattern.len2
+                              img_shape: Tuple[int, int]) -> Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int],
+    Tuple[np.ndarray, np.ndarray], np.ndarray, Tuple[float, float], np.ndarray, Tuple[float, float], np.ndarray]:
+        corner = np.array(l_pattern.corner, dtype=float)
+        v_a = np.array(l_pattern.vertex1, dtype=float)
+        v_b = np.array(l_pattern.vertex2, dtype=float)
+
+        arm_a = v_a - corner
+        arm_b = v_b - corner
+
+        if abs(arm_a[0]) > abs(arm_a[1]):
+            horiz_vertex, horiz_arm = v_a, arm_a
+            vert_vertex, vert_arm = v_b, arm_b
+        else:
+            horiz_vertex, horiz_arm = v_b, arm_b
+            vert_vertex, vert_arm = v_a, arm_a
+
+        v_diag = horiz_vertex + vert_vertex - corner
+
+        horiz_len = float(np.linalg.norm(horiz_arm))
+        vert_len = float(np.linalg.norm(vert_arm))
         tau = self.tau
         img_h, img_w = img_shape
+        depth_frac = 0.3
 
-        upper_x = max(0, int(x1 - tau))
-        upper_y = max(0, int(y1 - tau))
-        upper_w = min(img_w - upper_x, int(len1 + 2 * tau))
-        upper_h = min(img_h - upper_y, int(abs(len1 - len2) + 2 * tau))
+        def strip_aabb(p_start: np.ndarray, p_end: np.ndarray,
+                       inward_unit: np.ndarray, inward_depth: float) -> Tuple[int, int, int, int]:
+            offset = inward_unit * inward_depth
+            pts = np.stack([p_start, p_end, p_start + offset, p_end + offset])
+            x_min = int(np.floor(pts[:, 0].min())) - tau
+            y_min = int(np.floor(pts[:, 1].min())) - tau
+            x_max = int(np.ceil(pts[:, 0].max())) + tau
+            y_max = int(np.ceil(pts[:, 1].max())) + tau
+            x_min = max(0, x_min)
+            y_min = max(0, y_min)
+            x_max = min(img_w, x_max)
+            y_max = min(img_h, y_max)
+            return x_min, y_min, max(1, x_max - x_min), max(1, y_max - y_min)
 
-        right_x = min(img_w - 1, int(x3 + tau))
-        right_y = max(0, int(y3 - tau))
-        right_w = min(img_w - right_x, int(abs(len1 - len2) + 2 * tau))
-        right_h = min(img_h - right_y, int(len2 + 2 * tau))
+        inward_upper = -vert_arm / max(vert_len, 1e-6)
+        upper_region = strip_aabb(vert_vertex, v_diag, inward_upper, depth_frac * vert_len)
 
-        upper_w = max(1, upper_w)
-        upper_h = max(1, upper_h)
-        right_w = max(1, right_w)
-        right_h = max(1, right_h)
+        inward_right = -horiz_arm / max(horiz_len, 1e-6)
+        right_region = strip_aabb(horiz_vertex, v_diag, inward_right, depth_frac * horiz_len)
 
-        return (upper_x, upper_y, upper_w, upper_h), (right_x, right_y, right_w, right_h)
+        return (upper_region, right_region, (inward_right, inward_upper), vert_vertex,
+                (horiz_len, depth_frac * vert_len), horiz_vertex, (horiz_len * depth_frac, vert_len), v_diag)
 
     @staticmethod
-    def scan_edge_points(edge_img: np.ndarray,
-                         region: Tuple[int, int, int, int],
-                         direction: str = 'horizontal') -> Tuple[int, int]:
-        x, y, w, h = region
+    def scan_edge_along_arms_direction(
+            edge_img: np.ndarray,
+            sample_img: np.ndarray,
+            u_hat: np.ndarray,
+            v_hat: np.ndarray,
+            origin: np.ndarray,
+            u_len: int,
+            v_len: int
+    ):
+        best_v = 0
+        best_transitions = 0
+        for v in range(v_len):
+            signal = np.array([
+                int(edge_img[
+                        max(0, min(int(round((origin + u * u_hat + v * v_hat)[1])), edge_img.shape[0] - 1)),
+                        max(0, min(int(round((origin + u * u_hat + v * v_hat)[0])), edge_img.shape[1] - 1))
+                    ])
+                for u in range(u_len)
+            ])
+            binary = (signal > 0).astype(np.int8)
+            transitions = int(np.sum(np.abs(np.diff(binary))))
+            if transitions > best_transitions:
+                best_transitions = transitions
+                best_v = v
 
-        if x < 0 or y < 0 or x + w > edge_img.shape[1] or y + h > edge_img.shape[0]:
-            return 0, 0
+        most_edges_row = best_v
 
-        roi = edge_img[y:y+h, x:x+w]
+        edge_row = np.array([])
+        sampled_coords = []
+        for u in range(u_len):
+            coords = origin + u * u_hat + most_edges_row * v_hat
 
-        if direction == 'horizontal':
-            edge_counts = np.sum(roi > 0, axis=1)
-        else:
-            edge_counts = np.sum(roi > 0, axis=0)
+            row = int(round(coords[1]))
+            col = int(round(coords[0]))
 
-        if len(edge_counts) == 0:
-            return 0, 0
+            row = max(0, min(row, edge_img.shape[0] - 1))
+            col = max(0, min(col, edge_img.shape[1] - 1))
+            edge_row = np.append(edge_row, sample_img[row, col])
+            sampled_coords.append((col, row))
 
-        dashed_idx = int(np.argmax(edge_counts))
-        solid_idx = int(np.argmin(edge_counts))
+        return most_edges_row, edge_row, sampled_coords
 
-        return dashed_idx, solid_idx
+    @staticmethod
+    def find_outer_border_line(
+            edge_img: np.ndarray,
+            u_hat: np.ndarray,
+            v_hat: np.ndarray,
+            origin: np.ndarray,
+            u_len: int,
+            inward_depth: int,
+            margin: int = 10,
+            threshold_frac: float = 0.4
+    ) -> List[Tuple[int, int]]:
+        outer_origin = origin - margin * v_hat
+        total_v = margin + inward_depth
+
+        transitions_per_v = []
+        for v in range(total_v):
+            signal = np.array([
+                int(edge_img[
+                    max(0, min(int(round((outer_origin + u * u_hat + v * v_hat)[1])), edge_img.shape[0] - 1)),
+                    max(0, min(int(round((outer_origin + u * u_hat + v * v_hat)[0])), edge_img.shape[1] - 1))
+                ])
+                for u in range(u_len)
+            ])
+            binary = (signal > 0).astype(np.int8)
+            transitions = int(np.sum(np.abs(np.diff(binary))))
+            transitions_per_v.append(transitions)
+
+        max_trans = max(transitions_per_v) if transitions_per_v else 0
+        threshold = max_trans * threshold_frac
+
+        outer_v = 0
+        for v, t in enumerate(transitions_per_v):
+            if t >= threshold:
+                outer_v = v
+                break
+
+        sampled_coords = []
+        for u in range(u_len):
+            coords = outer_origin + u * u_hat + outer_v * v_hat
+            row = max(0, min(int(round(coords[1])), edge_img.shape[0] - 1))
+            col = max(0, min(int(round(coords[0])), edge_img.shape[1] - 1))
+            sampled_coords.append((col, row))
+
+        return sampled_coords
 
     @staticmethod
     def count_transitions(border: np.ndarray) -> int:
         if len(border) < 2:
             return 0
-
         b_min, b_max = float(np.min(border)), float(np.max(border))
-
         if b_max - b_min < 20.0:
             return 0
-
         threshold = (b_min + b_max) / 2.0
         binary_border = (border > threshold).astype(np.int8)
-
         transitions = np.sum(np.abs(np.diff(binary_border)))
         return int(transitions)
 
@@ -93,75 +179,55 @@ class DashedBorderDetector:
         if upper < 100: upper = 100
         return cv.Canny(image, lower, upper)
 
-    def detect(self, gray_img: np.ndarray, l_pattern: LPattern) -> Optional[DataMatrixLocation]:
+    def detect(self, gray_img: np.ndarray, l_pattern: LPattern) -> Tuple[Optional[DataMatrixLocation], np.ndarray]:
         edges = self._auto_canny(gray_img)
 
-        upper_region, right_region = self.get_detection_regions(l_pattern, gray_img.shape)
+        img_h, img_w = gray_img.shape[:2]
 
-        upper_dashed_row, _ = self.scan_edge_points(edges, upper_region, 'horizontal')
-        right_dashed_col, _ = self.scan_edge_points(edges, right_region, 'vertical')
+        (upper_region, right_region, (inward_right_unit, inward_upper_unit), vert_vertex, (border_len_upper, upper_inward),
+         horiz_vertex, (right_inward, border_len_right), v_diag) = self.get_detection_regions(l_pattern, (img_h, img_w))
 
-        upper_border_y = upper_region[1] + upper_dashed_row
-        right_border_x = right_region[0] + right_dashed_col
+        upper_dashed_row, extracted_arr_upper, upper_coords = self.scan_edge_along_arms_direction(edges, gray_img, inward_right_unit * -1,
+                                                                                    inward_upper_unit, vert_vertex,
+                                                                                    int(border_len_upper), int(upper_inward))
+        right_dashed_col, extracted_arr_right, right_coords = self.scan_edge_along_arms_direction(edges, gray_img, inward_upper_unit * -1,
+                                                                                    inward_right_unit, horiz_vertex,
+                                                                                    int(border_len_right), int(right_inward))
 
-        x_start, x_end = upper_region[0], upper_region[0] + upper_region[2]
-        upper_border = gray_img[upper_border_y, x_start:x_end]
-
-        y_start, y_end = right_region[1], right_region[1] + right_region[3]
-        right_border = gray_img[y_start:y_end, right_border_x]
-
-        cv.imshow("upper", upper_border)
-        cv.waitKey(0)
-
-        cv.imshow("right", right_border)
-        cv.waitKey(0)
-
-        t_upper = self.count_transitions(upper_border)
-        t_right = self.count_transitions(right_border)
-
-        print(f"upper transitions: {t_upper}, right transitions: {t_right}")
+        t_upper = self.count_transitions(extracted_arr_upper)
+        t_right = self.count_transitions(extracted_arr_right)
 
         if t_upper < self.min_transitions or t_right < self.min_transitions:
-            print(f"rejected candidate")
-            return None
+            return None, edges
 
-        x1, y1 = l_pattern.vertex1
-        x2, y2 = l_pattern.corner
-        x3, y3 = l_pattern.vertex2
+        upper_outer_coords = self.find_outer_border_line(
+            edges, inward_right_unit * -1, inward_upper_unit, vert_vertex,
+            int(border_len_upper), int(upper_inward))
+        right_outer_coords = self.find_outer_border_line(
+            edges, inward_upper_unit * -1, inward_right_unit, horiz_vertex,
+            int(border_len_right), int(right_inward))
 
-        min_x = min(int(x1), int(x2), int(x3))
-        min_y = min(int(upper_border_y), int(y1), int(y2), int(y3))
-        max_x = max(int(right_border_x), int(x1), int(x2), int(x3))
-        max_y = max(int(y1), int(y2), int(y3))
-
+        corners = np.array([l_pattern.corner, vert_vertex, horiz_vertex, v_diag])
+        min_x = int(np.floor(corners[:, 0].min()))
+        min_y = int(np.floor(corners[:, 1].min()))
+        max_x = int(np.ceil(corners[:, 0].max()))
+        max_y = int(np.ceil(corners[:, 1].max()))
         bounding_box = (min_x, min_y, max_x - min_x, max_y - min_y)
+
+        quad_corners = np.array([l_pattern.corner, horiz_vertex, v_diag, vert_vertex])
+        quads = (
+            (int(quad_corners[0][0]), int(quad_corners[0][1])),
+            (int(quad_corners[1][0]), int(quad_corners[1][1])),
+            (int(quad_corners[2][0]), int(quad_corners[2][1])),
+            (int(quad_corners[3][0]), int(quad_corners[3][1]))
+        )
 
         return DataMatrixLocation(
             l_pattern=l_pattern,
             upper_border=upper_region,
             right_border=right_region,
-            bounding_box=bounding_box
-        )
-
-    @staticmethod
-    def draw_detection_regions(image: np.ndarray,
-                               upper_region: Tuple[int, int, int, int],
-                               right_region: Tuple[int, int, int, int]) -> np.ndarray:
-        result = image.copy()
-
-        x, y, w, h = upper_region
-        cv.rectangle(result, (x, y), (x + w, y + h), (255, 255, 0), 1)
-
-        x, y, w, h = right_region
-        cv.rectangle(result, (x, y), (x + w, y + h), (0, 255, 255), 1)
-
-        return result
-
-    @staticmethod
-    def draw_location(image: np.ndarray,
-                      location: DataMatrixLocation,
-                      color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
-        result = image.copy()
-        x, y, w, h = location.bounding_box
-        cv.rectangle(result, (x, y), (x + w, y + h), color, 2)
-        return result
+            bounding_box=bounding_box,
+            quads=quads,
+            upper_outer_coords=upper_outer_coords,
+            right_outer_coords=right_outer_coords
+        ), edges

@@ -5,100 +5,71 @@ from dm_decoder.sampling.sampler import ModuleSampler
 from dm_decoder.mapping.utah_mapping import UtahMapper
 from dm_decoder.decoding.decoder import DataMatrixDecoder
 
-def snap_to_valid_size(estimated_n: int) -> int:
-    valid_sizes = [10, 12, 14, 16, 18, 20, 22, 24, 26, 32, 36, 40, 44, 48, 52, 64, 72, 80, 88, 96, 104, 120, 132, 144]
-    return min(valid_sizes, key=lambda x: abs(x - estimated_n))
-
 def main():
-    image_path = "./test_images/dmc_sample2.jpeg"
+    image_path = "test_images/dmc_test_4.png"
     frame = cv.imread(image_path)
 
     if frame is None:
-        print(f"error: could not load image from {image_path}")
+        print(f"Error: could not load image from {image_path}")
         return
 
     detector = DataMatrixPipeline()
     results = detector.process_frame(frame)
 
     output_frame = detector.draw_results(frame, results)
-    cv.imshow("1. detection", output_frame)
+    cv.imshow("1. Detection", output_frame)
 
     if results and results[0].is_valid:
-        warped_bgr = results[0].get_rectified_image(frame, output_size=400)
+        warped_bgr = results[0].get_rectified_image(frame)
 
         if warped_bgr is not None:
-            clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            warped_bgr = clahe.apply(cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY))
-            cv.imshow("2. rectified image (warped)", warped_bgr)
+            warp_gray = cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY)
+            warp_gray = cv.normalize(warp_gray, None, 0, 255, cv.NORM_MINMAX)
+            warp_gray = cv.GaussianBlur(warp_gray, (3, 3), 0)
 
-            warp_gray = warped_bgr
+            cv.imshow("2. Rectified image (warped)", warp_gray)
 
-            print("\ngrid estimator test:\n")
+            print("\n--- Geometric Grid Estimation ---")
 
             estimator = GridEstimator()
+            nx_snapped, ny_snapped, final_pitch_x, final_pitch_y = estimator.estimate_grid(warp_gray)
 
-            pitch, score = estimator.estimate_pitch(warp_gray)
+            print(f"Snapped grid size: {nx_snapped} cols x {ny_snapped} rows")
+            print(f"Module pixel size: {final_pitch_x:.2f} px")
 
-            if pitch is not None:
-                h, w = warp_gray.shape
+            sampler = ModuleSampler()
 
-                nx = int(round(w / pitch))
-                ny = int(round(h / pitch))
+            roi_color = cv.cvtColor(warp_gray, cv.COLOR_GRAY2BGR)
+            sampler.draw_grid(roi_color, horizontal_pitch=final_pitch_x, vertical_pitch=final_pitch_y)
+            cv.imshow("3. Grid visualization", roi_color)
 
-                nx_snapped = snap_to_valid_size(nx)
-                ny_snapped = snap_to_valid_size(ny)
+            data_matrix = sampler.get_matrix_data(
+                image=warp_gray,
+                horizontal_pitch=final_pitch_x,
+                vertical_pitch=final_pitch_y,
+                rows=ny_snapped,
+                cols=nx_snapped
+            )
 
-                final_pitch_x = w / nx_snapped
-                final_pitch_y = h / ny_snapped
+            print(f"\nData matrix size (without borders): {data_matrix.shape[1]}x{data_matrix.shape[0]}")
+            print("Binary data region preview (0=white, 1=black):\n")
 
-                print(f"estimated module size (initial pitch): {pitch:.2f} px")
-                print(f"corrected pitch after snap: {final_pitch_x:.2f} px")
-                print(f"snapped grid size: {nx_snapped} cols x {ny_snapped} rows")
-                print(f"alternation validation score: {score:.2f}")
+            for row in data_matrix:
+                row_str = "".join(["1 " if val == 1 else "0 " for val in row])
+                print(row_str)
 
-                if score > 0.8:
-                    print("good score\n")
-                elif score < 0.6:
-                    print("bad score\n")
+            print("\n--- UTAH MAPPING TEST ---")
+            mapper = UtahMapper()
+            codewords = mapper.map_to_codewords(data_matrix)
 
-                sampler = ModuleSampler()
+            print(f"Extracted {len(codewords)} total codewords (bytes)")
+            print(f"Raw data bytes: {codewords}")
 
-                roi_color = warped_bgr.copy()
-                sampler.draw_grid(roi_color, horizontal_pitch=final_pitch_x, vertical_pitch=final_pitch_y)
-                cv.imshow("3. grid visualization", roi_color)
+            print("\n--- REED SOLOMON ERROR CORRECTION TEST ---")
+            decoder = DataMatrixDecoder()
+            final_text = decoder.decode(codewords)
 
-                data_matrix = sampler.get_matrix_data(
-                    image=warp_gray,
-                    horizontal_pitch=final_pitch_x,
-                    vertical_pitch=final_pitch_y,
-                    rows=ny_snapped,
-                    cols=nx_snapped
-                )
-
-                print(f"data matrix size (without borders): {data_matrix.shape[1]}x{data_matrix.shape[0]}")
-                print("binary data region preview (0=white, 1=black):\n")
-
-                for row in data_matrix:
-                    row_str = "".join(["1 " if val == 1 else "0 " for val in row])
-                    print(row_str)
-
-                print("\nUTAH MAPPING TEST")
-                mapper = UtahMapper()
-
-                codewords = mapper.map_to_codewords(data_matrix)
-
-                print(f"extracted {len(codewords)} total codewords (bytes)")
-                print(f"raw data bytes: {codewords}")
-
-                print("\nREED SOLOMON ERROR CORRECTION TEST")
-
-                decoder = DataMatrixDecoder()
-
-                final_text = decoder.decode(codewords)
-
-                print(f"final text extraction from data matrix code: {final_text}")
-            else:
-                print("could not estimate pitch")
+            print(f"\n[ Final text extraction from data matrix code ] -> {final_text}")
 
     cv.waitKey(0)
     cv.destroyAllWindows()

@@ -9,12 +9,13 @@ class ValidationResult:
     edge_density: float
     aspect_ratio: float
     score: float
+    reason: str = ""
 
 class DataMatrixValidator:
 
     def __init__(self,
-                 min_edge_density: float = 0.1,
-                 max_edge_density: float = 0.6,
+                 min_edge_density: float = 0.003,
+                 max_edge_density: float = 0.75,
                  min_aspect_ratio: float = 0.5,
                  max_aspect_ratio: float = 2.0,
                  min_size: int = 20):
@@ -28,32 +29,41 @@ class DataMatrixValidator:
         h, w = gray_region.shape[:2]
 
         if h < self.min_size or w < self.min_size:
-            return ValidationResult(False, 0, 0, 0)
+            reason = f"Region too small ({w}x{h})"
+            return ValidationResult(False, 0, 0, 0, reason)
 
         aspect_ratio = max(w, h) / min(w, h)
-        if not (self.min_aspect_ratio <= aspect_ratio <= self.max_aspect_ratio):
-            return ValidationResult(False, 0, aspect_ratio, 0)
-
-        edges = cv.Canny(gray_region, 50, 150)
-        edge_pixels = np.count_nonzero(edges)
-        edge_density = float(edge_pixels) / (h * w)
-
-        if not (self.min_edge_density <= edge_density <= self.max_edge_density):
-            return ValidationResult(False, edge_density, aspect_ratio, 0)
-
         len_ratio = l_pattern.len1 / (l_pattern.len2 + 1e-6)
         if len_ratio > 2.5:
-            return ValidationResult(False, edge_density, aspect_ratio, 0)
+            reason = f"L-arm ratio too large ({len_ratio:.2f})"
+            return ValidationResult(False, 0, aspect_ratio, 0, reason)
 
-        density_score = 1.0 - abs(edge_density - 0.3) / 0.3
-        aspect_score = 1.0 - abs(aspect_ratio - 1.0) / 1.0
+        lx, ly, lw, lh = l_pattern.get_bounding_box()
+        x1, y1 = max(0, lx), max(0, ly)
+        x2, y2 = min(w, lx + lw), min(h, ly + lh)
+        roi = gray_region[y1:y2, x1:x2] if x2 > x1 and y2 > y1 else gray_region
+
+        clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        roi_enhanced = clahe.apply(roi)
+
+        edges = cv.Canny(roi_enhanced, 50, 150)
+
+        edge_pixels = np.count_nonzero(edges)
+        edge_density = float(edge_pixels) / (roi.shape[0] * roi.shape[1])
+
+        if not (self.min_edge_density <= edge_density <= self.max_edge_density):
+            reason = f"Edge density {edge_density:.4f} out of [{self.min_edge_density}, {self.max_edge_density}]"
+            return ValidationResult(False, edge_density, aspect_ratio, 0, reason)
+
         l_score = l_pattern.score if hasattr(l_pattern, 'score') else 0.5
+        total_score = l_score
 
-        total_score = density_score * 0.3 + aspect_score * 0.3 + l_score * 0.4
+        reason = "Good score" if total_score > 0.4 else "Bad score"
 
         return ValidationResult(
             is_valid=total_score > 0.4,
             edge_density=edge_density,
             aspect_ratio=aspect_ratio,
-            score=total_score
+            score=total_score,
+            reason=reason
         )

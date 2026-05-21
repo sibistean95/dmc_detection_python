@@ -23,7 +23,6 @@ class CandidateExtraction:
         v = float(np.median(image))
         lower = int(max(0.0, (1.0 - sigma) * v))
         upper = int(min(255.0, (1.0 + sigma) * v))
-        print(f"Canny lower: {lower} upper: {upper}")
         return cv.Canny(image, lower, upper)
 
     def edge_detection(self, image_gray: np.ndarray) -> np.ndarray:
@@ -42,7 +41,7 @@ class CandidateExtraction:
 
         return processed
 
-    def contour_analysis(self, original_image: np.ndarray, binary_map: np.ndarray, shape: Tuple[int, int]) -> List[Tuple[int, int, int, int]]:
+    def contour_analysis(self, binary_map: np.ndarray, shape: Tuple[int, int]) -> List[Tuple[int, int, int, int]]:
         contours, hierarchy = cv.findContours(binary_map, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
         candidate_boxes = []
         img_h, img_w = shape
@@ -52,13 +51,7 @@ class CandidateExtraction:
 
         hierarchy = hierarchy[0]
 
-        img_copy = original_image.copy()
-
-        bgr_img = cv.cvtColor(binary_map, cv.COLOR_GRAY2BGR)
-
         for i, contour in enumerate(contours):
-            cv.drawContours(img_copy, [contour], 0, (0, 255, 0), 2)
-
             perimeter = cv.arcLength(contour, True)
             area = cv.contourArea(contour)
 
@@ -79,7 +72,6 @@ class CandidateExtraction:
                 w_new = min(img_w - x_new, w + 2 * self.padding)
                 h_new = min(img_h - y_new, h + 2 * self.padding)
 
-                print(f"[Extraction] contour {i}: accepted box ({x_new},{y_new},{w_new},{h_new}) perimeter={perimeter:.0f} area={area:.0f}")
                 candidate_boxes.append((x_new, y_new, w_new, h_new))
 
         return candidate_boxes
@@ -96,9 +88,6 @@ class CandidateExtraction:
 
         preprocess = self.morphological_processing(gray)
 
-        cv.imshow("Clahe", preprocess)
-        cv.waitKey(0)
-
-        candidates = self.contour_analysis(frame, preprocess, gray.shape)
+        candidates = self.contour_analysis(preprocess, (int(gray.shape[0]), int(gray.shape[1])))
 
         return candidates

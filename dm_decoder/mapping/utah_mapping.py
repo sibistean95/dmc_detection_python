@@ -14,8 +14,6 @@ class UtahMapper:
             col += ncol
             row += 4 - ((ncol + 4) % 8)
 
-        # print(f"row = {row}, col = {col}")
-
         visited[row, col] = True
 
         if matrix[row, col] == 1:
