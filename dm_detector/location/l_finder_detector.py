@@ -119,30 +119,28 @@ class LFinderDetector:
         return max(0, angle_score * 0.4 + ratio_score * 0.3 + dist_score * 0.3)
 
     @staticmethod
-    def _count_line_transitions(line: np.ndarray, min_amplitude: float = 35.0) -> int:
+    def _count_line_transitions(line: np.ndarray, min_amplitude: float = 20.0) -> int:
         if line.size < 2:
             return 0
         lo, hi = float(np.min(line)), float(np.max(line))
-
         if hi - lo < min_amplitude:
             return 0
-
         threshold = (lo + hi) / 2.0
         binary = (line > threshold).astype(np.int8)
         return int(np.sum(np.abs(np.diff(binary))))
 
     @staticmethod
     def _interior_is_high_frequency(gray: np.ndarray, pattern: LPattern,
-                                    min_eigenvalue: float = 150.0,
-                                    max_isotropy_ratio: float = 2.5,
-                                    min_transitions_per_line: int = 7,
-                                    num_scan_lines: int = 7) -> bool:
+                                    min_eigenvalue: float = 100.0,
+                                    max_isotropy_ratio: float = 10.0,
+                                    min_transitions_per_line: int = 4,
+                                    num_scan_lines: int = 5) -> bool:
         img_h, img_w = gray.shape[:2]
         lx, ly, lw, lh = pattern.get_bounding_box()
         x1, y1 = max(0, lx), max(0, ly)
         x2, y2 = min(img_w, lx + lw), min(img_h, ly + lh)
 
-        if x2 - x1 < 10 or y2 - y1 < 10:
+        if x2 - x1 < 8 or y2 - y1 < 8:
             return False
 
         roi = gray[y1:y2, x1:x2]
@@ -162,38 +160,44 @@ class LFinderDetector:
         l2 = trace / 2 - np.sqrt(disc)
 
         if l2 < min_eigenvalue:
+            print(f"[structure tensor] λ1={l1:.1f}, λ2={l2:.1f} -- λ2 below min {min_eigenvalue}")
             return False
+
         if l1 > max_isotropy_ratio * l2:
+            print(f"[structure tensor] λ1={l1:.1f}, λ2={l2:.1f} -- ratio {l1/max(l2,1e-6):.1f} > {max_isotropy_ratio} (too anisotropic)")
             return False
 
         rh, rw = roi.shape[:2]
         h_trans = []
         v_trans = []
-
         for k in range(1, num_scan_lines + 1):
-            fraction = 0.2 + 0.6 * (k / (num_scan_lines + 1))
-            row = int(rh * fraction)
-            col = int(rw * fraction)
+            row = int(rh * k / (num_scan_lines + 1))
+            col = int(rw * k / (num_scan_lines + 1))
             h_trans.append(LFinderDetector._count_line_transitions(roi[row, :]))
             v_trans.append(LFinderDetector._count_line_transitions(roi[:, col]))
 
+        min_h = min(h_trans)
+        min_v = min(v_trans)
         median_h = int(np.median(h_trans))
         median_v = int(np.median(v_trans))
 
         if median_h < min_transitions_per_line or median_v < min_transitions_per_line:
+            print(f"[transitions] h={h_trans} v={v_trans} -- median(h)={median_h} median(v)={median_v} below min {min_transitions_per_line}")
             return False
 
         max_trans = max(median_h, median_v)
         min_trans = min(median_h, median_v)
-        if max_trans > 0 and (min_trans / max_trans) < 0.4:
+        if max_trans > 0 and (min_trans / max_trans) < 0.5:
             return False
 
         if min(h_trans) < 3 or min(v_trans) < 3:
             return False
 
+        print(f"[structure tensor] λ1={l1:.1f}, λ2={l2:.1f} -- accepted")
+        print(f"[transitions] h_median={median_h} v_median={median_v} (min_h={min_h} min_v={min_v}) -- accepted")
         return True
 
-    def find_l_patterns(self, gray: np.ndarray, segments: List[LineSegment]) -> List[LPattern]:
+    def find_l_patterns(self, frame: np.ndarray, gray: np.ndarray, segments: List[LineSegment]) -> List[LPattern]:
         l_patterns = []
 
         for i, seg_i in enumerate(segments):
@@ -204,21 +208,37 @@ class LFinderDetector:
             best_score = 0.0
             best_j = -1
 
+            pairs_total = 0
+            fail_angle = 0
+            fail_ratio = 0
+            fail_connection = 0
+            min_conn_dist = float('inf')
+
             for j, seg_j in enumerate(segments):
                 if i >= j or seg_j.marked:
                     continue
+                pairs_total += 1
 
                 angle = self._angle_between_segments(seg_i, seg_j)
                 if not (self.min_angle <= angle <= self.max_angle):
+                    fail_angle += 1
                     continue
 
                 len_i, len_j = seg_i.length, seg_j.length
                 ratio = max(len_i, len_j) / min(len_i, len_j)
                 if ratio > self.max_length_ratio:
+                    fail_ratio += 1
                     continue
+
+                for s1_c in (seg_i.p1, seg_i.p2):
+                    for s2_c in (seg_j.p1, seg_j.p2):
+                        d = self._distance(s1_c, s2_c)
+                        if d < min_conn_dist:
+                            min_conn_dist = d
 
                 connection = self._find_connection_point(seg_i, seg_j)
                 if connection is None:
+                    fail_connection += 1
                     continue
 
                 vertex1, corner, vertex2, conn_dist = connection
@@ -226,6 +246,9 @@ class LFinderDetector:
 
                 if score > best_score:
                     best_score = score
+                    pattern_img = frame.copy()
+                    if best_pattern:
+                        pattern_img = self.draw_l_patterns(pattern_img, [best_pattern], (0, 255, 255))
                     best_j = j
                     best_pattern = LPattern(
                         vertex1=vertex1,
@@ -235,6 +258,13 @@ class LFinderDetector:
                         len2=min(len_i, len_j),
                         score=score
                     )
+
+            if best_pattern is None and seg_i.length >= 50:
+                print(f"[L-finder] anchor seg#{i} (len={seg_i.length:.0f}) "
+                      f"pairs={pairs_total} fail_angle={fail_angle} fail_ratio={fail_ratio} "
+                      f"fail_connection={fail_connection} "
+                      f"min_endpoint_dist={min_conn_dist:.1f} "
+                      f"(threshold {self.neighborhood_radius})")
 
             if best_pattern:
                 if best_score <= 0.5:
@@ -248,3 +278,52 @@ class LFinderDetector:
 
         l_patterns.sort(key=lambda p: p.score, reverse=True)
         return l_patterns
+
+    def detect(self, region: np.ndarray) -> List[LPattern]:
+        segments = self.detect_lines(region)
+        return self.find_l_patterns(region, segments)
+
+    @staticmethod
+    def _show_pattern(frame: np.ndarray, pattern: LPattern, label: str, accepted: bool,
+                      window: str = "l pattern debug"):
+        img = frame.copy()
+        color = (0, 255, 0) if accepted else (0, 0, 255)
+        cv.line(img,
+                (int(pattern.vertex1[0]), int(pattern.vertex1[1])),
+                (int(pattern.corner[0]), int(pattern.corner[1])), color, 3)
+        cv.line(img,
+                (int(pattern.vertex2[0]), int(pattern.vertex2[1])),
+                (int(pattern.corner[0]), int(pattern.corner[1])), color, 3)
+        cv.circle(img, (int(pattern.corner[0]), int(pattern.corner[1])), 5, (0, 0, 255), -1)
+        lx, ly, lw, lh = pattern.get_bounding_box()
+        cv.rectangle(img, (lx, ly), (lx + lw, ly + lh), color, 1)
+        cv.putText(img, label, (5, 18), cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv.LINE_AA)
+        cv.imshow(window, img)
+        cv.waitKey(0)
+
+    @staticmethod
+    def draw_segments(image: np.ndarray, segments: List[LineSegment],
+                      color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
+        result = image.copy()
+        for seg in segments:
+            pt1 = (int(seg.p1[0]), int(seg.p1[1]))
+            pt2 = (int(seg.p2[0]), int(seg.p2[1]))
+            cv.line(result, pt1, pt2, color, 5)
+        return result
+
+    @staticmethod
+    def draw_l_patterns(image: np.ndarray, patterns: List[LPattern],
+                        color: Tuple[int, int, int] = (255, 0, 255)) -> np.ndarray:
+        result = image.copy()
+        for pattern in patterns:
+            v1 = (int(pattern.vertex1[0]), int(pattern.vertex1[1]))
+            corner = (int(pattern.corner[0]), int(pattern.corner[1]))
+            v2 = (int(pattern.vertex2[0]), int(pattern.vertex2[1]))
+
+            cv.line(result, v1, corner, color, 2)
+            cv.line(result, corner, v2, color, 2)
+            cv.circle(result, corner, 4, (0, 0, 255), -1)
+            cv.circle(result, v1, 3, (255, 255, 0), -1)
+            cv.circle(result, v2, 3, (255, 255, 0), -1)
+
+        return result

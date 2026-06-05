@@ -1,3 +1,5 @@
+import math
+
 import cv2 as cv
 import numpy as np
 from typing import List, Tuple, Optional
@@ -8,6 +10,7 @@ from dm_detector.location.l_finder_detector import LFinderDetector, LPattern
 from dm_detector.location.validator import DataMatrixValidator
 from dm_detector.location.dashed_border_detector import DashedBorderDetector
 from dm_detector.geometry.border_fitter import BorderFitter, PreciseLocation
+
 
 @dataclass
 class DetectionResult:
@@ -21,34 +24,7 @@ class DetectionResult:
         if not self.precise_location or not self.l_patterns:
             return None
 
-        vertices = np.array(self.precise_location.vertices, dtype=np.float32)
-
-        cx, cy, _, _ = self.candidate_box
-        l_corner_global = np.array(self.l_patterns[0].corner) + [cx, cy]
-        corner_idx = int(np.argmin(np.linalg.norm(vertices - l_corner_global, axis=1)))
-
-        v_adj1 = vertices[(corner_idx + 1) % 4]
-        v_diag = vertices[(corner_idx + 2) % 4]
-        v_adj2 = vertices[(corner_idx + 3) % 4]
-
-        vec1 = v_adj1 - vertices[corner_idx]
-        vec2 = v_adj2 - vertices[corner_idx]
-
-        cross_prod = vec1[0] * vec2[1] - vec1[1] * vec2[0]
-
-        if cross_prod < 0:
-            horiz_v = v_adj1
-            vert_v = v_adj2
-        else:
-            horiz_v = v_adj2
-            vert_v = v_adj1
-
-        ordered_src = np.array([
-            vertices[corner_idx],
-            horiz_v,
-            v_diag,
-            vert_v
-        ], dtype=np.float32)
+        l_pat = self.l_patterns[0]
 
         dst_pts = np.array([
             [0, output_size - 1],
@@ -57,8 +33,51 @@ class DetectionResult:
             [0, 0]
         ], dtype=np.float32)
 
+        cx, cy, _, _ = self.candidate_box
+
+        src_corner = np.array([l_pat.corner[0] + cx, l_pat.corner[1] + cy])
+
+        arm1 = np.array(l_pat.vertex1) - np.array(l_pat.corner)
+        arm2 = np.array(l_pat.vertex2) - np.array(l_pat.corner)
+
+        print(f"[warper] ARM1: {arm1}, ARM2: {arm2}")
+        if (abs(arm1[0]) - abs(arm1[1])) > (abs(arm2[0]) - abs(arm2[1])):
+            src_horiz = np.array([l_pat.vertex1[0] + cx, l_pat.vertex1[1] + cy])
+            src_vert = np.array([l_pat.vertex2[0] + cx, l_pat.vertex2[1] + cy])
+            horiz_arm = arm1
+            vert_arm = arm2
+        else:
+            src_horiz = np.array([l_pat.vertex2[0] + cx, l_pat.vertex2[1] + cy])
+            src_vert = np.array([l_pat.vertex1[0] + cx, l_pat.vertex1[1] + cy])
+            horiz_arm = arm2
+            vert_arm = arm1
+
+        # cv.line(full_frame, (int(src_horiz[0]), int(src_horiz[1])), (int(src_corner[0]), int(src_corner[1])), (0, 0, 255), 2)
+        # cv.line(full_frame, (int(src_vert[0]), int(src_vert[1])), (int(src_corner[0]), int(src_corner[1])),
+        #         (0, 255, 0), 2)
+        #
+        # cv.imshow("warp check", full_frame)
+        # cv.waitKey(0)
+        vertices = [np.asarray(v, dtype=np.float32) for v in self.precise_location.vertices]
+        remaining = list(range(len(vertices)))
+
+        assignments = [(src_corner, 0), (src_horiz, 1), (src_vert, 3)]
+
+        if (horiz_arm[0] > 0 and vert_arm[1] > 0) or (horiz_arm[0] < 0 and vert_arm[1] < 0):
+            assignments = [(src_corner, 0), (src_horiz, 3), (src_vert, 1)]
+
+        ordered_src = [None] * 4
+        for l_pt, dst_idx in assignments:
+            best_i = min(remaining, key=lambda i: np.linalg.norm(vertices[i] - l_pt))
+            ordered_src[dst_idx] = vertices[best_i]
+            remaining.remove(best_i)
+
+        ordered_src[2] = vertices[remaining[0]]  # leftover → TR
+        ordered_src = np.array(ordered_src, dtype=np.float32)
+
         M = cv.getPerspectiveTransform(ordered_src, dst_pts)
         return cv.warpPerspective(full_frame, M, (output_size, output_size))
+
 
 class DataMatrixPipeline:
 
@@ -87,6 +106,7 @@ class DataMatrixPipeline:
         for v in visited:
             if current[0] >= v[0] and current[1] >= v[1] and current[2] <= v[2] and current[3] <= v[3]:
                 return True
+
         return False
 
     def process_frame(self, frame: np.ndarray) -> List[DetectionResult]:
@@ -101,20 +121,34 @@ class DataMatrixPipeline:
         for (x, y, w, h) in candidates:
             region = np.ascontiguousarray(gray[y:y + h, x:x + w])
 
+            # cv.imshow("region", region)
+            # cv.waitKey(0)
+
             if self.parent_visited(visited_candidates, (x, y, x + w, y + h)):
                 continue
             visited_candidates.append((x, y, x + w, y + h))
 
             segments = self.l_finder.detect_lines(region)
-            l_patterns = self.l_finder.find_l_patterns(region, segments)
+            l_patterns = self.l_finder.find_l_patterns(cv.cvtColor(region, cv.COLOR_GRAY2BGR), region, segments)
 
             for idx, l_pattern in enumerate(l_patterns):
                 validation = self.validator.validate(region, l_pattern)
+
+                label = f"#{idx} VALIDATOR {'ACCEPT' if validation.is_valid else 'REJECT'}: {validation.reason}"
+                self.l_finder._show_pattern(
+                    cv.cvtColor(region, cv.COLOR_GRAY2BGR),
+                    l_pattern, label, validation.is_valid, window="detected"
+                )
 
                 if not validation.is_valid:
                     continue
 
                 dashed_result, edges = self.dashed_detector.detect(region, l_pattern)
+                dashed_label = f"#{idx} DASHED {'ACCEPT' if dashed_result is not None else 'REJECT'}"
+                self.l_finder._show_pattern(
+                    cv.cvtColor(region, cv.COLOR_GRAY2BGR),
+                    l_pattern, dashed_label, dashed_result is not None, window="detected"
+                )
 
                 if dashed_result is None:
                     continue
@@ -122,6 +156,7 @@ class DataMatrixPipeline:
                 precise_location = self.border_fitter.fit(region, edges, l_pattern, rough_location=dashed_result)
 
                 if precise_location is None:
+                    print(f"[pipeline] precise location not found")
                     bx, by, bw, bh = dashed_result.bounding_box
                     vertices = [
                         (float(bx), float(by)),
@@ -137,6 +172,11 @@ class DataMatrixPipeline:
                         angle=0.0,
                         size=(float(bw), float(bh))
                     )
+                else:
+                    print(f"[pipeline] precise location found: {precise_location.vertices}")
+                    cv.drawContours(region, [np.int32(precise_location.vertices)], 0, (0, 0, 255), 2)
+                    cv.imshow("precise location", region)
+                    cv.waitKey(0)
 
                 global_vertices = [(vx + x, vy + y) for vx, vy in precise_location.vertices]
                 precise_location.vertices = global_vertices
@@ -154,18 +194,64 @@ class DataMatrixPipeline:
         return results
 
     @staticmethod
+    def check_l_pattern_duplicate(current_l_pattern: LPattern, current_candidate: list,
+                                  selected: List[DetectionResult], threshold: float):
+        for s in selected:
+            v1_global = (
+                s.l_patterns[0].vertex1[0] + s.candidate_box[0], s.l_patterns[0].vertex1[1] + s.candidate_box[1])
+            v2_global = (
+                s.l_patterns[0].vertex2[0] + s.candidate_box[0], s.l_patterns[0].vertex2[1] + s.candidate_box[1])
+            corner_global = (
+                s.l_patterns[0].corner[0] + s.candidate_box[0], s.l_patterns[0].corner[1] + s.candidate_box[1])
+
+            current_v1_global = (
+                current_l_pattern.vertex1[0] + current_candidate[0],
+                current_l_pattern.vertex1[1] + current_candidate[1])
+            current_v2_global = (
+                current_l_pattern.vertex2[0] + current_candidate[0],
+                current_l_pattern.vertex2[1] + current_candidate[1])
+            current_corner_global = (
+                current_l_pattern.corner[0] + current_candidate[0], current_l_pattern.corner[1] + current_candidate[1])
+
+            v1_dist = math.sqrt((current_v1_global[0] - v1_global[0]) ** 2 + (current_v1_global[1] - v1_global[1]) ** 2)
+            v2_dist = math.sqrt((current_v2_global[0] - v2_global[0]) ** 2 + (current_v2_global[1] - v2_global[1]) ** 2)
+            corner_dist = math.sqrt(
+                (current_corner_global[0] - corner_global[0]) ** 2 + (current_corner_global[1] - corner_global[1]) ** 2)
+
+            if (v1_dist + v2_dist + corner_dist) < threshold:
+                return True
+
+        return False
+
+    @staticmethod
     def draw_results(frame: np.ndarray, results: List[DetectionResult],
                      debug_view: bool = False) -> np.ndarray:
         output = frame.copy()
 
         for result in results:
             if result.precise_location and result.is_valid:
+                print("DMC DETECTED")
                 vertices = result.precise_location.get_ordered_vertices()
                 pts = np.array(vertices, dtype=np.int32)
                 cv.polylines(output, [pts], True, (0, 255, 0), 2)
 
                 if debug_view:
+                    print("DMC DETECTED, DRAWING CANDIDATE")
                     cx, cy = int(result.precise_location.center[0]), int(result.precise_location.center[1])
                     cv.circle(output, (cx, cy), 10, (255, 0, 0), -1)
 
+            elif debug_view:
+                print("DMC NOT DETECTED BUT DRAWING CANDIDATE")
+
         return output
+
+    @staticmethod
+    def draw_l_pattern(frame: np.ndarray, l_pattern: LPattern, color: tuple = (0, 255, 0)):
+        result = frame.copy()
+
+        cv.line(result, (int(l_pattern.vertex1[0]), int(l_pattern.vertex1[1])),
+                (int(l_pattern.corner[0]), int(l_pattern.corner[1])), color, 3)
+        cv.line(result, (int(l_pattern.vertex2[0]), int(l_pattern.vertex2[1])),
+                (int(l_pattern.corner[0]), int(l_pattern.corner[1])), color, 3)
+
+        return result

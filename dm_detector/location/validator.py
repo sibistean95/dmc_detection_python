@@ -29,13 +29,15 @@ class DataMatrixValidator:
         h, w = gray_region.shape[:2]
 
         if h < self.min_size or w < self.min_size:
-            reason = f"Region too small ({w}x{h})"
+            reason = f"region too small ({w}x{h})"
+            print(f"[validator] rejected: {reason}")
             return ValidationResult(False, 0, 0, 0, reason)
 
         aspect_ratio = max(w, h) / min(w, h)
         len_ratio = l_pattern.len1 / (l_pattern.len2 + 1e-6)
         if len_ratio > 2.5:
             reason = f"L-arm ratio too large ({len_ratio:.2f})"
+            print(f"[validator] rejected: {reason}")
             return ValidationResult(False, 0, aspect_ratio, 0, reason)
 
         lx, ly, lw, lh = l_pattern.get_bounding_box()
@@ -52,13 +54,19 @@ class DataMatrixValidator:
         edge_density = float(edge_pixels) / (roi.shape[0] * roi.shape[1])
 
         if not (self.min_edge_density <= edge_density <= self.max_edge_density):
-            reason = f"Edge density {edge_density:.4f} out of [{self.min_edge_density}, {self.max_edge_density}]"
+            reason = f"edge density {edge_density:.4f} out of [{self.min_edge_density}, {self.max_edge_density}]"
+            print(f"[validator] rejected: {reason}")
             return ValidationResult(False, edge_density, aspect_ratio, 0, reason)
 
         l_score = l_pattern.score if hasattr(l_pattern, 'score') else 0.5
         total_score = l_score
 
-        reason = "Good score" if total_score > 0.4 else "Bad score"
+        if total_score > 0.4:
+            reason = f"score={total_score:.2f} density={edge_density:.4f} l={l_score:.2f}"
+            print(f"[validator] accepted: {reason}")
+        else:
+            reason = f"l_score {l_score:.2f} <= 0.4 (density={edge_density:.4f})"
+            print(f"[validator] rejected: {reason}")
 
         return ValidationResult(
             is_valid=total_score > 0.4,

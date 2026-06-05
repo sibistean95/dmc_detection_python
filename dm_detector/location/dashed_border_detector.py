@@ -15,6 +15,7 @@ class DataMatrixLocation:
     upper_outer_coords: List[Tuple[int, int]]
     right_outer_coords: List[Tuple[int, int]]
 
+
 class DashedBorderDetector:
 
     def __init__(self, tau: int = 5, edge_threshold: int = 50, min_transitions: int = 9):
@@ -45,7 +46,7 @@ class DashedBorderDetector:
         vert_len = float(np.linalg.norm(vert_arm))
         tau = self.tau
         img_h, img_w = img_shape
-        depth_frac = 0.3
+        depth_frac = 0.1
 
         def strip_aabb(p_start: np.ndarray, p_end: np.ndarray,
                        inward_unit: np.ndarray, inward_depth: float) -> Tuple[int, int, int, int]:
@@ -70,8 +71,8 @@ class DashedBorderDetector:
         return (upper_region, right_region, (inward_right, inward_upper), vert_vertex,
                 (horiz_len, depth_frac * vert_len), horiz_vertex, (horiz_len * depth_frac, vert_len), v_diag)
 
-    @staticmethod
     def scan_edge_along_arms_direction(
+            self,
             edge_img: np.ndarray,
             sample_img: np.ndarray,
             u_hat: np.ndarray,
@@ -90,8 +91,21 @@ class DashedBorderDetector:
                     ])
                 for u in range(u_len)
             ])
+            scan_coords = []
+            for u in range(u_len):
+                coords = origin + u * u_hat + v * v_hat
+                row = int(round(coords[1]))
+                col = int(round(coords[0]))
+
+                row = max(0, min(row, edge_img.shape[0] - 1))
+                col = max(0, min(col, edge_img.shape[1] - 1))
+                scan_coords.append((col, row))
+
             binary = (signal > 0).astype(np.int8)
             transitions = int(np.sum(np.abs(np.diff(binary))))
+            print(f"transitions: {transitions}")
+            self.draw_sampled_border(edge_img.copy(), scan_coords, None)
+
             if transitions > best_transitions:
                 best_transitions = transitions
                 best_v = v
@@ -159,14 +173,42 @@ class DashedBorderDetector:
         return sampled_coords
 
     @staticmethod
+    def scan_edge_points(edge_img: np.ndarray,
+                         region: Tuple[int, int, int, int],
+                         direction: str = 'horizontal') -> Tuple[int, int]:
+        x, y, w, h = region
+
+        if x < 0 or y < 0 or x + w > edge_img.shape[1] or y + h > edge_img.shape[0]:
+            return 0, 0
+
+        roi = edge_img[y:y+h, x:x+w]
+
+        if direction == 'horizontal':
+            edge_counts = np.sum(roi > 0, axis=1)
+        else:
+            edge_counts = np.sum(roi > 0, axis=0)
+
+        if len(edge_counts) == 0:
+            return 0, 0
+
+        dashed_idx = int(np.argmax(edge_counts))
+        solid_idx = int(np.argmin(edge_counts))
+
+        return dashed_idx, solid_idx
+
+    @staticmethod
     def count_transitions(border: np.ndarray) -> int:
         if len(border) < 2:
             return 0
+
         b_min, b_max = float(np.min(border)), float(np.max(border))
+
         if b_max - b_min < 20.0:
             return 0
+
         threshold = (b_min + b_max) / 2.0
         binary_border = (border > threshold).astype(np.int8)
+
         transitions = np.sum(np.abs(np.diff(binary_border)))
         return int(transitions)
 
@@ -187,25 +229,37 @@ class DashedBorderDetector:
         (upper_region, right_region, (inward_right_unit, inward_upper_unit), vert_vertex, (border_len_upper, upper_inward),
          horiz_vertex, (right_inward, border_len_right), v_diag) = self.get_detection_regions(l_pattern, (img_h, img_w))
 
-        upper_dashed_row, extracted_arr_upper, upper_coords = self.scan_edge_along_arms_direction(edges, gray_img, inward_right_unit * -1,
-                                                                                    inward_upper_unit, vert_vertex,
-                                                                                    int(border_len_upper), int(upper_inward))
-        right_dashed_col, extracted_arr_right, right_coords = self.scan_edge_along_arms_direction(edges, gray_img, inward_upper_unit * -1,
-                                                                                    inward_right_unit, horiz_vertex,
-                                                                                    int(border_len_right), int(right_inward))
+        cv.imshow("canny dashed border", edges)
+        cv.waitKey(0)
+
+        upper_dashed_row, extracted_arr_upper, upper_coords = self.scan_edge_along_arms_direction(
+            edges, gray_img, inward_right_unit * -1, inward_upper_unit, vert_vertex,
+            int(border_len_upper), int(upper_inward)
+        )
+        right_dashed_col, extracted_arr_right, right_coords = self.scan_edge_along_arms_direction(
+            edges, gray_img, inward_upper_unit * -1, inward_right_unit, horiz_vertex,
+            int(border_len_right), int(right_inward)
+        )
+
+        self.draw_sampled_border(edges, upper_coords, right_coords)
 
         t_upper = self.count_transitions(extracted_arr_upper)
         t_right = self.count_transitions(extracted_arr_right)
 
         if t_upper < self.min_transitions or t_right < self.min_transitions:
+            print(f"[dashed] rejected: upper_transitions={t_upper}, right_transitions={t_right}, min={self.min_transitions}")
             return None, edges
+
+        print(f"[dashed] accepted: upper_transitions={t_upper}, right_transitions={t_right}")
 
         upper_outer_coords = self.find_outer_border_line(
             edges, inward_right_unit * -1, inward_upper_unit, vert_vertex,
-            int(border_len_upper), int(upper_inward))
+            int(border_len_upper), int(upper_inward)
+        )
         right_outer_coords = self.find_outer_border_line(
             edges, inward_upper_unit * -1, inward_right_unit, horiz_vertex,
-            int(border_len_right), int(right_inward))
+            int(border_len_right), int(right_inward)
+        )
 
         corners = np.array([l_pattern.corner, vert_vertex, horiz_vertex, v_diag])
         min_x = int(np.floor(corners[:, 0].min()))
@@ -215,12 +269,7 @@ class DashedBorderDetector:
         bounding_box = (min_x, min_y, max_x - min_x, max_y - min_y)
 
         quad_corners = np.array([l_pattern.corner, horiz_vertex, v_diag, vert_vertex])
-        quads = (
-            (int(quad_corners[0][0]), int(quad_corners[0][1])),
-            (int(quad_corners[1][0]), int(quad_corners[1][1])),
-            (int(quad_corners[2][0]), int(quad_corners[2][1])),
-            (int(quad_corners[3][0]), int(quad_corners[3][1]))
-        )
+        quads = tuple((int(p[0]), int(p[1])) for p in quad_corners)
 
         return DataMatrixLocation(
             l_pattern=l_pattern,
@@ -231,3 +280,40 @@ class DashedBorderDetector:
             upper_outer_coords=upper_outer_coords,
             right_outer_coords=right_outer_coords
         ), edges
+
+    @staticmethod
+    def draw_sampled_border(edge_img: np.ndarray,
+                            upper_coords: Optional[List[Tuple[int, int]]],
+                            right_coords: Optional[List[Tuple[int, int]]]):
+        vis = cv.cvtColor(edge_img, cv.COLOR_GRAY2BGR)
+        if upper_coords is not None:
+            for (col, row) in upper_coords:
+                vis[row, col] = (0, 0, 255)
+
+        if right_coords is not None:
+            for (col, row) in right_coords:
+                vis[row, col] = (0, 0, 255)
+        cv.imshow("sampled borders", vis)
+        cv.waitKey(0)
+
+    def draw_detection_regions(image: np.ndarray,
+                               upper_region: Tuple[int, int, int, int],
+                               right_region: Tuple[int, int, int, int]) -> np.ndarray:
+        result = image.copy()
+
+        x, y, w, h = upper_region
+        cv.rectangle(result, (x, y), (x + w, y + h), (255, 255, 0), 1)
+
+        x, y, w, h = right_region
+        cv.rectangle(result, (x, y), (x + w, y + h), (0, 255, 255), 1)
+
+        return result
+
+    @staticmethod
+    def draw_location(image: np.ndarray,
+                      location: DataMatrixLocation,
+                      color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
+        result = image.copy()
+        x, y, w, h = location.bounding_box
+        cv.rectangle(result, (x, y), (x + w, y + h), color, 2)
+        return result

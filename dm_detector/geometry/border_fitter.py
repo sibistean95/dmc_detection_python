@@ -18,11 +18,14 @@ class PreciseLocation:
 
 class BorderFitter:
 
-    METHOD_EXTENT = "Extent"
-    METHOD_RANSAC = "Ransac"
+    METHOD_EXTENT = "extent"
+    METHOD_RANSAC = "ransac"
+    METHOD_OUTER = "outer"
+    METHOD_CLEAN = "clean"
 
-    def __init__(self, method: str = METHOD_EXTENT):
-        if method not in (self.METHOD_EXTENT, self.METHOD_RANSAC):
+    def __init__(self, method: str = METHOD_CLEAN):
+        if method not in (self.METHOD_EXTENT, self.METHOD_RANSAC,
+                          self.METHOD_OUTER, self.METHOD_CLEAN):
             raise ValueError(f"Unknown border-fitter method: {method!r}")
         self.method = method
 
@@ -33,6 +36,10 @@ class BorderFitter:
 
         if self.method == self.METHOD_EXTENT:
             return self._fit_extent(gray_img, rough_location)
+        if self.method == self.METHOD_OUTER:
+            return self._fit_outer_edges(gray_img, rough_location)
+        if self.method == self.METHOD_CLEAN:
+            return self._fit_clean_linefit(gray_img, rough_location)
         return self._fit_ransac(edge_img, rough_location)
 
     @staticmethod
@@ -50,6 +57,264 @@ class BorderFitter:
             angle=angle,
             size=(w, h)
         )
+
+    def _fit_clean_linefit(self, gray_img: np.ndarray,
+                           rough_location: DataMatrixLocation,
+                           dilate: int = 5,
+                           ransac_iterations: int = 1500) -> Optional[PreciseLocation]:
+        quad = np.array([np.array(q, dtype=float) for q in rough_location.quads])
+        center = quad.mean(axis=0)
+
+        blurred = cv.GaussianBlur(gray_img, (3, 3), 0)
+        quad_mask = np.zeros(blurred.shape[:2], dtype=np.uint8)
+        cv.fillConvexPoly(quad_mask, quad.astype(np.int32), 255)
+        interior = blurred[quad_mask > 0]
+        thr, _ = cv.threshold(interior.reshape(-1, 1), 0, 255,
+                              cv.THRESH_BINARY + cv.THRESH_OTSU)
+        _, bw = cv.threshold(blurred, thr, 255, cv.THRESH_BINARY_INV)
+        cv.imshow("bw", bw)
+
+        mask = cv.dilate(quad_mask, cv.getStructuringElement(cv.MORPH_ELLIPSE, (dilate, dilate)))
+        cleaned = cv.bitwise_and(bw, mask)
+        cleaned = cv.morphologyEx(cleaned, cv.MORPH_OPEN, np.ones((2, 2), np.uint8))
+
+        cv.imshow("cleaned", cleaned)
+        cv.waitKey(0)
+
+        lines = []
+        all_pts = []
+        for a, b in [(0, 1), (1, 2), (2, 3), (3, 0)]:
+            p_start, p_end = quad[a], quad[b]
+            direction = p_end - p_start
+            length = float(np.linalg.norm(direction))
+            if length < 2.0:
+                return None
+            u_hat = direction / length
+            perp = np.array([-u_hat[1], u_hat[0]])
+            if np.dot(perp, (p_start + p_end) / 2 - center) < 0:
+                perp = -perp
+
+            pts = self._scan_boundary_inward(cleaned, p_start, p_end, perp)
+            if len(pts) < 2:
+                return None
+            line = self._ransac_line_outer(
+                pts, perp, direction, max_iterations=ransac_iterations
+            )
+            if line is None:
+                return None
+            lines.append(line)
+            all_pts.append(pts)
+
+        corner = self._intersect_lines(lines[3], lines[0])
+        horiz = self._intersect_lines(lines[0], lines[1])
+        v_diag = self._intersect_lines(lines[1], lines[2])
+        vert = self._intersect_lines(lines[2], lines[3])
+        if any(v is None for v in (corner, horiz, v_diag, vert)):
+            return None
+
+        self._show_fitted_lines(cleaned, lines, all_pts, [corner, horiz, v_diag, vert])
+
+        return self._build_precise_location(
+            [(float(p[0]), float(p[1])) for p in (corner, horiz, v_diag, vert)]
+        )
+
+    @staticmethod
+    def _show_fitted_lines(cleaned: np.ndarray, lines: list, all_pts: list,
+                           corners: list, window: str = "border fit") -> None:
+        vis = cv.cvtColor(cleaned, cv.COLOR_GRAY2BGR)
+        colors = [(0, 0, 255), (0, 255, 255), (255, 0, 0), (0, 255, 0)]  # side 0..3
+        diag = float(np.hypot(*cleaned.shape[:2]))
+
+        for (normal, c), pts, col in zip(lines, all_pts, colors):
+            for p in pts:
+                cv.circle(vis, (int(round(p[0])), int(round(p[1]))), 1, col, -1)
+            normal = np.asarray(normal, dtype=float)
+            d = np.array([-normal[1], normal[0]])
+            p0 = -c * normal
+            pa = (p0 - d * diag).astype(int)
+            pb = (p0 + d * diag).astype(int)
+            cv.line(vis, tuple(pa), tuple(pb), col, 1)
+
+        quad = np.array([[int(round(p[0])), int(round(p[1]))] for p in corners], dtype=np.int32)
+        cv.polylines(vis, [quad], True, (255, 0, 255), 1)
+        for p in corners:
+            cv.circle(vis, (int(round(p[0])), int(round(p[1]))), 2, (255, 0, 255), -1)
+
+        scale = max(1, int(round(600.0 / max(cleaned.shape[:2]))))
+        if scale > 1:
+            vis = cv.resize(vis, None, fx=scale, fy=scale, interpolation=cv.INTER_NEAREST)
+        cv.imshow(window, vis)
+        cv.waitKey(0)
+
+    @staticmethod
+    def _scan_boundary_inward(cleaned: np.ndarray, p_start: np.ndarray, p_end: np.ndarray,
+                              perp: np.ndarray, win_out: float = 8.0, win_in: float = 8.0,
+                              step: float = 0.5) -> np.ndarray:
+        direction = p_end - p_start
+        length = float(np.linalg.norm(direction))
+        if length < 2.0:
+            return np.empty((0, 2))
+        u_hat = direction / length
+
+        h, w = cleaned.shape[:2]
+
+        def is_fg(q: np.ndarray) -> bool:
+            ix, iy = int(round(q[0])), int(round(q[1]))
+            return 0 <= iy < h and 0 <= ix < w and cleaned[iy, ix] > 0
+
+        pts = []
+        n = max(4, int(length))
+        for i in range(n):
+            base = p_start + (i + 0.5) * length / n * u_hat
+            s = win_out
+            while s >= -win_in:
+                if is_fg(base + perp * s) and is_fg(base + perp * (s - step)):
+                    pts.append(base + perp * s)
+                    break
+                s -= step
+
+        return np.array(pts) if pts else np.empty((0, 2))
+
+    @staticmethod
+    def _ransac_line_outer(points: np.ndarray, perp_out: np.ndarray, expected_dir: np.ndarray,
+                           max_iterations: int = 1500, inlier_threshold: float = 1.2,
+                           max_outside: int = 2,
+                           angle_tol_deg: float = 22.0) -> Optional[Tuple[np.ndarray, float]]:
+        n = len(points)
+        if n < 2:
+            return None
+        perp_out = perp_out / (np.linalg.norm(perp_out) + 1e-12)
+        expected_angle = float(np.arctan2(expected_dir[1], expected_dir[0]))
+        tol = np.radians(angle_tol_deg)
+
+        def angle_diff(a: float, b: float) -> float:
+            d = abs(a - b) % np.pi
+            return min(d, np.pi - d)
+
+        best_inliers = None
+        best_key = (-1, -1e18)
+        rng = np.random.default_rng(0)
+        for _ in range(max_iterations):
+            idx = rng.choice(n, 2, replace=False)
+            p1, p2 = points[idx[0]], points[idx[1]]
+            d = p2 - p1
+            d_len = np.linalg.norm(d)
+            if d_len < 1e-6:
+                continue
+            if angle_diff(float(np.arctan2(d[1], d[0])), expected_angle) > tol:
+                continue
+            normal = np.array([-d[1], d[0]]) / d_len
+            if np.dot(normal, perp_out) < 0:
+                normal = -normal
+            c = -np.dot(normal, p1)
+            signed = points @ normal + c
+            inliers = np.abs(signed) < inlier_threshold
+            outside = int(np.sum(signed > inlier_threshold))
+            if outside > max_outside:
+                continue
+            key = (int(np.sum(inliers)), float(c))
+            if key > best_key:
+                best_key = key
+                best_inliers = inliers
+
+        if best_inliers is None or int(np.sum(best_inliers)) < 2:
+            return None
+
+        inlier_pts = points[best_inliers].astype(np.float32)
+        vx, vy, x0, y0 = cv.fitLine(inlier_pts, cv.DIST_L2, 0, 0.01, 0.01).flatten()
+        normal = np.array([-vy, vx])
+        if np.dot(normal, perp_out) < 0:
+            normal = -normal
+        c = -(normal[0] * x0 + normal[1] * y0)
+        return (normal, c)
+
+    def _fit_outer_edges(self, gray_img: np.ndarray,
+                         rough_location: DataMatrixLocation,
+                         ransac_iterations: int = 500,
+                         inlier_threshold: float = 1.5) -> Optional[PreciseLocation]:
+        quad = np.array([np.array(q, dtype=float) for q in rough_location.quads])
+        center = quad.mean(axis=0)
+
+        h_img, w_img = gray_img.shape[:2]
+        pad = 6
+        x0 = max(0, int(np.floor(quad[:, 0].min())) - pad)
+        y0 = max(0, int(np.floor(quad[:, 1].min())) - pad)
+        x1 = min(w_img, int(np.ceil(quad[:, 0].max())) + pad)
+        y1 = min(h_img, int(np.ceil(quad[:, 1].max())) + pad)
+        crop = gray_img[y0:y1, x0:x1]
+        if crop.size == 0:
+            return None
+        thr = float(cv.threshold(crop, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU)[0])
+
+        edge_pairs = [(0, 1), (1, 2), (2, 3), (3, 0)]
+        lines = []
+        for a, b in edge_pairs:
+            edge_len = float(np.linalg.norm(quad[b] - quad[a]))
+            win_out = max(5.0, 0.18 * edge_len)
+            win_in = max(1.5, 0.05 * edge_len)
+            pts = self._scan_outer_edge_points(
+                gray_img, quad[a], quad[b], center, thr, win_out, win_in
+            )
+            if len(pts) < 2:
+                return None
+            line = self._ransac_fit_line(
+                pts, max_iterations=ransac_iterations, inlier_threshold=inlier_threshold
+            )
+            if line is None:
+                return None
+            lines.append(line)
+
+        corner = self._intersect_lines(lines[3], lines[0])
+        horiz = self._intersect_lines(lines[0], lines[1])
+        v_diag = self._intersect_lines(lines[1], lines[2])
+        vert = self._intersect_lines(lines[2], lines[3])
+        if any(v is None for v in (corner, horiz, v_diag, vert)):
+            return None
+
+        return self._build_precise_location(
+            [(float(p[0]), float(p[1])) for p in (corner, horiz, v_diag, vert)]
+        )
+
+    @staticmethod
+    def _scan_outer_edge_points(gray: np.ndarray, p_start: np.ndarray, p_end: np.ndarray,
+                                center: np.ndarray, thr: float,
+                                win_out: float, win_in: float,
+                                step: float = 0.4) -> np.ndarray:
+        direction = p_end - p_start
+        length = float(np.linalg.norm(direction))
+        if length < 2.0:
+            return np.empty((0, 2))
+
+        u_hat = direction / length
+        perp = np.array([-u_hat[1], u_hat[0]])
+        if np.dot(perp, (p_start + p_end) / 2 - center) < 0:
+            perp = -perp
+
+        h, w = gray.shape[:2]
+
+        def sample(q: np.ndarray) -> float:
+            ix, iy = int(round(q[0])), int(round(q[1]))
+            if 0 <= iy < h and 0 <= ix < w:
+                return float(gray[iy, ix])
+            return 255.0
+
+        pts = []
+        n = max(4, int(length))
+        for i in range(n):
+            base = p_start + (i + 0.5) * length / n * u_hat
+
+            edge_s = None
+            s = win_out
+            while s >= -win_in:
+                if sample(base + perp * s) < thr and sample(base + perp * (s - step)) < thr:
+                    edge_s = s
+                    break
+                s -= step
+            if edge_s is None:
+                continue
+            pts.append(base + perp * edge_s)
+
+        return np.array(pts) if pts else np.empty((0, 2))
 
     def _fit_extent(self, gray_img: np.ndarray,
                     rough_location: DataMatrixLocation,
@@ -83,6 +348,8 @@ class BorderFitter:
         if bounds is None:
             return None
         x_left, y_top, x_right, y_bottom = bounds
+
+        self._draw_extent_debug(warped, binary, x_left, y_top, x_right, y_bottom)
 
         warped_corners = np.array([
             [x_left, y_bottom],
@@ -130,6 +397,8 @@ class BorderFitter:
                 return None
             fitted_lines.append(line)
 
+        self._draw_scan_debug(edge_img, borders, all_border_pts, fitted_lines)
+
         vertices_raw = [
             self._intersect_lines(fitted_lines[3], fitted_lines[0]),
             self._intersect_lines(fitted_lines[0], fitted_lines[1]),
@@ -158,6 +427,22 @@ class BorderFitter:
 
         return (int(cols_above[0]), int(rows_above[0]),
                 int(cols_above[-1]), int(rows_above[-1]))
+
+    @staticmethod
+    def _draw_extent_debug(warped: np.ndarray, binary: np.ndarray,
+                           x_left: int, y_top: int, x_right: int, y_bottom: int) -> None:
+        warped_bgr = cv.cvtColor(warped, cv.COLOR_GRAY2BGR)
+        binary_bgr = cv.cvtColor(binary, cv.COLOR_GRAY2BGR)
+
+        for img in (warped_bgr, binary_bgr):
+            cv.line(img, (0, y_top), (img.shape[1] - 1, y_top), (0, 0, 255), 1)
+            cv.line(img, (0, y_bottom), (img.shape[1] - 1, y_bottom), (0, 0, 255), 1)
+            cv.line(img, (x_left, 0), (x_left, img.shape[0] - 1), (0, 255, 0), 1)
+            cv.line(img, (x_right, 0), (x_right, img.shape[0] - 1), (0, 255, 0), 1)
+
+        cv.imshow("border_fitter: warped + extent", warped_bgr)
+        cv.imshow("border_fitter: binary + extent", binary_bgr)
+        cv.waitKey(0)
 
     @staticmethod
     def _scan_border_points(edge_img: np.ndarray, p_start: np.ndarray, p_end: np.ndarray,
@@ -235,7 +520,7 @@ class BorderFitter:
         normal = np.array([-vy, vx])
         c = -(normal[0] * x0 + normal[1] * y0)
 
-        return normal, c
+        return (normal, c)
 
     @staticmethod
     def _intersect_lines(line1: Tuple[np.ndarray, float],
@@ -251,6 +536,53 @@ class BorderFitter:
             return None
 
         return np.linalg.solve(A, b)
+
+    @staticmethod
+    def _draw_scan_debug(edge_img: np.ndarray, borders: list, all_border_pts: list,
+                         fitted_lines: list) -> None:
+        if len(edge_img.shape) == 2:
+            debug = cv.cvtColor(edge_img, cv.COLOR_GRAY2BGR)
+        else:
+            debug = edge_img.copy()
+
+        colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255)]
+        labels = ["bottom", "right", "top", "left"]
+
+        pts_only = debug.copy()
+        for i, pts in enumerate(all_border_pts):
+            for pt in pts:
+                cv.circle(pts_only, (int(round(pt[0])), int(round(pt[1]))), 1, colors[i], -1)
+
+        with_lines = debug.copy()
+        for i, ((p_start, p_end), (normal, c)) in enumerate(zip(borders, fitted_lines)):
+            d_start = float(np.dot(normal, p_start) + c)
+            d_end = float(np.dot(normal, p_end) + c)
+            proj_start = p_start - d_start * normal
+            proj_end = p_end - d_end * normal
+            cv.line(
+                with_lines,
+                (int(round(proj_start[0])), int(round(proj_start[1]))),
+                (int(round(proj_end[0])), int(round(proj_end[1]))),
+                colors[i], 2
+            )
+
+        legend_h = 20 * len(labels) + 10
+        legend = np.zeros((legend_h, 200, 3), dtype=np.uint8)
+        for i, (color, lbl) in enumerate(zip(colors, labels)):
+            cv.circle(legend, (15, 15 + i * 20), 5, color, -1)
+            cv.putText(legend, lbl, (30, 20 + i * 20), cv.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+
+        target_size = 800
+        h, w = pts_only.shape[:2]
+        scale = max(1, int(round(target_size / max(h, w))))
+        if scale > 1:
+            pts_only = cv.resize(pts_only, (w * scale, h * scale), interpolation=cv.INTER_NEAREST)
+            with_lines = cv.resize(with_lines, (w * scale, h * scale), interpolation=cv.INTER_NEAREST)
+
+        cv.imshow("border_fitter: sampled points", pts_only)
+        cv.imshow("border_fitter: ransac lines", with_lines)
+        cv.imshow("border_fitter: legend", legend)
+        cv.waitKey(0)
 
     @staticmethod
     def _fit_from_l_pattern(l_pattern: LPattern) -> PreciseLocation:
@@ -281,3 +613,15 @@ class BorderFitter:
             angle=0,
             size=(float(np.linalg.norm(dir_h)), float(np.linalg.norm(dir_v)))
         )
+
+    @staticmethod
+    def draw_precise_location(image: np.ndarray,
+                              location: PreciseLocation,
+                              color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
+        result = image.copy()
+        vertices = location.get_ordered_vertices()
+
+        pts = np.array(vertices, dtype=np.int32).reshape((-1, 1, 2))
+        cv.polylines(result, [pts], True, color, 2)
+
+        return result
