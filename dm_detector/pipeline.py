@@ -1,17 +1,16 @@
 import math
-
 import cv2 as cv
 import numpy as np
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
-
 from dm_detector.extraction.candidate_extraction import CandidateExtraction
 from dm_detector.location.l_finder_detector import LFinderDetector, LPattern
 from dm_detector.location.validator import DataMatrixValidator
 from dm_detector.location.dashed_border_detector import DashedBorderDetector
 from dm_detector.geometry.border_fitter import BorderFitter, PreciseLocation
+from pdgen import include_in_uml
 
-
+@include_in_uml
 @dataclass
 class DetectionResult:
     candidate_box: Tuple[int, int, int, int]
@@ -78,7 +77,7 @@ class DetectionResult:
         M = cv.getPerspectiveTransform(ordered_src, dst_pts)
         return cv.warpPerspective(full_frame, M, (output_size, output_size))
 
-
+@include_in_uml
 class DataMatrixPipeline:
 
     def __init__(self,

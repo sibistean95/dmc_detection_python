@@ -1,6 +1,8 @@
 import cv2 as cv
 import numpy as np
+from pdgen import include_in_uml
 
+@include_in_uml
 class ModuleSampler:
     @staticmethod
     def draw_grid(image: np.ndarray, horizontal_pitch: float, vertical_pitch: float) -> None:

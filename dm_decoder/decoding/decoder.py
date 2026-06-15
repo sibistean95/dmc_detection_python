@@ -1,5 +1,7 @@
 import reedsolo
+from pdgen import include_in_uml
 
+@include_in_uml
 class DataMatrixDecoder:
     def __init__(self):
         self.ec_table = {

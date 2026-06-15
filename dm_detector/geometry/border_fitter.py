@@ -2,10 +2,11 @@ import cv2 as cv
 import numpy as np
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
-
 from dm_detector.location.l_finder_detector import LPattern
 from dm_detector.location.dashed_border_detector import DataMatrixLocation
+from pdgen import include_in_uml
 
+@include_in_uml
 @dataclass
 class PreciseLocation:
     vertices: List[Tuple[float, float]]
@@ -16,6 +17,7 @@ class PreciseLocation:
     def get_ordered_vertices(self) -> List[Tuple[int, int]]:
         return [(int(v[0]), int(v[1])) for v in self.vertices]
 
+@include_in_uml
 class BorderFitter:
 
     METHOD_EXTENT = "extent"

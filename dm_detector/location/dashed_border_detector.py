@@ -2,9 +2,10 @@ import cv2 as cv
 import numpy as np
 from typing import Tuple, Optional, List
 from dataclasses import dataclass
-
 from .l_finder_detector import LPattern
+from pdgen import include_in_uml
 
+@include_in_uml
 @dataclass
 class DataMatrixLocation:
     l_pattern: LPattern
@@ -15,7 +16,7 @@ class DataMatrixLocation:
     upper_outer_coords: List[Tuple[int, int]]
     right_outer_coords: List[Tuple[int, int]]
 
-
+@include_in_uml
 class DashedBorderDetector:
 
     def __init__(self, tau: int = 5, edge_threshold: int = 50, min_transitions: int = 9):

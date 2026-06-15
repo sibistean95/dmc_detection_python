@@ -1,7 +1,9 @@
 import cv2 as cv
 import numpy as np
 from typing import List, Tuple
+from pdgen import include_in_uml
 
+@include_in_uml
 class CandidateExtraction:
     def __init__(self,
                  canny_t1: int = 100,
@@ -54,11 +56,7 @@ class CandidateExtraction:
 
         img_copy = original_image.copy()
 
-        bgr_img = cv.cvtColor(binary_map, cv.COLOR_GRAY2BGR)
-
         for i, contour in enumerate(contours):
-            cv.drawContours(img_copy, [contour], 0, (0, 255, 0), 2)
-
             perimeter = cv.arcLength(contour, True)
             area = cv.contourArea(contour)
 
@@ -81,6 +79,11 @@ class CandidateExtraction:
 
                 print(f"[extraction] contour {i}: accepted box ({x_new},{y_new},{w_new},{h_new}) perim={perimeter:.0f} area={area:.0f}")
                 candidate_boxes.append((x_new, y_new, w_new, h_new))
+
+                cv.rectangle(img_copy, (x_new, y_new), (x_new + w_new, y_new + h_new), (0, 0, 255), 2)
+
+        cv.imshow("candidate bounding box", img_copy)
+        cv.waitKey(0)
 
         return candidate_boxes
 

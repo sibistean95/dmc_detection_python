@@ -8,7 +8,7 @@ from utils import contrast_power_law
 
 
 def main():
-    image_path = "./test_images/dmc_test_3.jpeg"
+    image_path = "./test_images/dmc_test_6.jpg"
     frame = cv.imread(image_path)
 
     if frame is None:
@@ -50,7 +50,7 @@ def main():
                 grid_vis = cv.cvtColor(warp_gray, cv.COLOR_GRAY2BGR)
                 estimator.draw_module_grid(grid_vis, col_centres, row_centres)
                 grid_vis = estimator.draw_module_numbers(grid_vis, col_centres, row_centres)
-                cv.imshow("3. Final Grid", grid_vis)
+                cv.imshow("4. Final Grid", grid_vis)
 
             else:
                 pitch, score = estimator.estimate_pitch(filtered)

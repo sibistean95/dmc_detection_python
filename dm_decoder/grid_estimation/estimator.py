@@ -1,8 +1,9 @@
 import cv2 as cv
 import numpy as np
 from typing import Tuple, Optional
+from pdgen import include_in_uml
 
-
+@include_in_uml
 class GridEstimator:
     def __init__(self,
                  band_thickness: int = 11,

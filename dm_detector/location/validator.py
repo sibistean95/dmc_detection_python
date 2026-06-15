@@ -2,7 +2,9 @@ import cv2 as cv
 import numpy as np
 from dataclasses import dataclass
 from .l_finder_detector import LPattern
+from pdgen import include_in_uml
 
+@include_in_uml
 @dataclass
 class ValidationResult:
     is_valid: bool
@@ -11,6 +13,7 @@ class ValidationResult:
     score: float
     reason: str = ""
 
+@include_in_uml
 class DataMatrixValidator:
 
     def __init__(self,

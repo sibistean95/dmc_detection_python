@@ -2,7 +2,9 @@ import cv2 as cv
 import numpy as np
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
+from pdgen import include_in_uml
 
+@include_in_uml
 @dataclass
 class LineSegment:
     p1: Tuple[float, float]
@@ -17,6 +19,7 @@ class LineSegment:
     def angle(self) -> float:
         return np.arctan2(self.p2[1] - self.p1[1], self.p2[0] - self.p1[0])
 
+@include_in_uml
 @dataclass
 class LPattern:
     vertex1: Tuple[float, float]
@@ -38,6 +41,7 @@ class LPattern:
             h = h + padding
         return x, y, w, h
 
+@include_in_uml
 class LFinderDetector:
     def __init__(self,
                  neighborhood_radius: float = 10.0,

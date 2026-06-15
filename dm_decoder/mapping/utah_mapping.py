@@ -1,6 +1,8 @@
 import numpy as np
 from typing import List
+from pdgen import include_in_uml
 
+@include_in_uml
 class UtahMapper:
     def __init__(self):
         self.chunk_counter = 0
