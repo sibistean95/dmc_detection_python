@@ -51,12 +51,6 @@ class DetectionResult:
             horiz_arm = arm2
             vert_arm = arm1
 
-        # cv.line(full_frame, (int(src_horiz[0]), int(src_horiz[1])), (int(src_corner[0]), int(src_corner[1])), (0, 0, 255), 2)
-        # cv.line(full_frame, (int(src_vert[0]), int(src_vert[1])), (int(src_corner[0]), int(src_corner[1])),
-        #         (0, 255, 0), 2)
-        #
-        # cv.imshow("warp check", full_frame)
-        # cv.waitKey(0)
         vertices = [np.asarray(v, dtype=np.float32) for v in self.precise_location.vertices]
         remaining = list(range(len(vertices)))
 
@@ -119,9 +113,6 @@ class DataMatrixPipeline:
 
         for (x, y, w, h) in candidates:
             region = np.ascontiguousarray(gray[y:y + h, x:x + w])
-
-            # cv.imshow("region", region)
-            # cv.waitKey(0)
 
             if self.parent_visited(visited_candidates, (x, y, x + w, y + h)):
                 continue

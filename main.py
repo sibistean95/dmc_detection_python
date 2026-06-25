@@ -6,7 +6,6 @@ from dm_decoder.mapping.utah_mapping import UtahMapper
 from dm_decoder.decoding.decoder import DataMatrixDecoder
 from utils import contrast_power_law
 
-
 def main():
     image_path = "./test_images/dmc_test_6.jpg"
     frame = cv.imread(image_path)

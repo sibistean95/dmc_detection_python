@@ -31,7 +31,7 @@ from dm_detector.pipeline import DataMatrixPipeline
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
-    poza_output = Path("diagrama_clase_dmc.png")
-    text_output = Path("diagrama_clase_dmc.txt")
+    poza_output = Path("uml_classes_diagram.png")
+    text_output = Path("uml_classes_diagram.txt")
 
     generate_diagram(poza_output, text_output)

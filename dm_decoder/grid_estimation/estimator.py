@@ -64,8 +64,6 @@ class GridEstimator:
                       ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """Return (col_centres, row_centres) sampling positions, or None if the
         timing borders are too degraded to locate enough boundaries."""
-        h, w = warp_gray.shape[:2]
-
         col_bounds = self._timing_boundaries(warp_gray, axis="x", off=off)
         row_bounds = self._timing_boundaries(warp_gray, axis="y", off=off)
         if col_bounds is None or row_bounds is None:
@@ -217,7 +215,6 @@ class GridEstimator:
         """Sample a module bit at each (row, col) centre (1 = dark module).
         Threshold is Otsu over the per-module medians."""
         n_rows, n_cols = len(row_centres), len(col_centres)
-        h, w = img.shape[:2]
         meds = np.zeros((n_rows, n_cols), dtype=np.float32)
         for r in range(n_rows):
             y = int(round(row_centres[r]))
