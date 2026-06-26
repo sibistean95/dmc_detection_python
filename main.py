@@ -7,7 +7,7 @@ from matrixvision import viz, DetectorConfig, BorderFitterConfig, CvDebugSink, N
 
 
 def main():
-    filename = "img.png"
+    filename = "dmc_test_7.png"
     image_path = f"test_images/{filename}"
     frame = cv.imread(image_path)
 

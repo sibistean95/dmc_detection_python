@@ -1,1 +1,0 @@
-from dm_decoder.mapping.utah_mapping import UtahMapper

@@ -42,7 +42,7 @@ def decode_zxing(img):
     return [b.text for b in zxingcpp.read_barcodes(img)]
 
 
-DECODER_NAMES = ["dmc", "pylibdmtx", "zxing"]
+DECODER_NAMES = ["matrixvision", "pylibdmtx", "zxing"]
 
 
 def _run(fn, img):
@@ -89,7 +89,7 @@ def main():
         cells = {}
         raw = {}
         for name in DECODER_NAMES:
-            if name == "dmc":
+            if name == "matrixvision":
                 texts, dt = _run(lambda im: decode_dmc(im, case.config), img)
             elif name == "pylibdmtx":
                 texts, dt = _run(decode_pylibdmtx, img)
@@ -115,9 +115,9 @@ def _print_report(rows, total, labeled, correct, decoded, elapsed):
     label_w = max(len(r[1]) for r in rows) if rows else 11
     col = 11
 
-    header = f"{'image':<{name_w}}  {'label':<{label_w}}  " + "".join(f"{n:<{col}}" for n in DECODER_NAMES)
+    header = f"{'image':<{name_w}}  {'label':<{label_w}}  " + " ".join(f"{n:<{col}}" for n in DECODER_NAMES)
     print("\n" + header)
-    print("-" * len(header))
+    print(" -" * len(header))
     for image, label, cells, _raw in rows:
         line = f"{image:<{name_w}}  {label:<{label_w}}  " + "".join(f"{cells[n]:<{col}}" for n in DECODER_NAMES)
         print(line)
@@ -140,7 +140,7 @@ def _print_payloads(rows):
     print("\nDecoded payloads (consensus = likely true label)")
     print("-" * 60)
     for image, label, _cells, raw in rows:
-        print(f"{image}  [label: {label}]")
+        print(f"{image}     [label: {label}]")
         for n in DECODER_NAMES:
             texts = raw[n]
             shown = ", ".join(_sanitize(t) for t in texts) if texts else "—"

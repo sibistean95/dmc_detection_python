@@ -261,14 +261,31 @@ class GridEstimator:
         n_rows, n_cols = len(row_centres), len(col_centres)
         h, w = img.shape[:2]
         meds = np.zeros((n_rows, n_cols), dtype=np.float32)
+
+        debug_img = cv.cvtColor(img, cv.COLOR_GRAY2BGR)
+
         for r in range(n_rows):
             y = int(round(row_centres[r]))
             for c in range(n_cols):
                 x = int(round(col_centres[c]))
+                cv.circle(debug_img, (x, y), radius=1, color=(0, 0, 255), thickness=-1)
                 blk = img[max(0, y - win):y + win + 1, max(0, x - win):x + win + 1]
                 meds[r, c] = np.median(blk) if blk.size else 255.0
+
         thr = cv.threshold(meds.astype(np.uint8), 0, 255,
                            cv.THRESH_BINARY + cv.THRESH_OTSU)[0]
+        self.debug.log(f"threshold: {thr}")
+
+        unique_vals, counts = np.unique(meds.astype(np.uint8), return_counts=True)
+
+        for val, count in zip(unique_vals, counts):
+            print(f"grayscale value: {val:3d} | appeared in {count} modules")
+
+        print(f"\nminimum value: {np.min(meds)}")
+        print(f"\nmaximum value: {np.max(meds)}")
+
+        thr = np.min(meds) + (np.max(meds) - np.min(meds)) / 2
+
         # Otsu's dark class is value <= thr; use <= so a thr of 0 (saturated,
         # heavily bimodal modules) still classifies the 0-valued dark modules.
         return (meds >= thr).astype(np.uint8) if inverted else (meds <= thr).astype(np.uint8)
@@ -370,140 +387,3 @@ class GridEstimator:
                     result[y - 1][x - 1] = 1
 
         return result
-
-    def ecc200_codewords_from_data_modules(self, bits):
-        """
-        bits: 2D array-like (numRows x numCols), data modules only (0/1).
-        Returns: list[int] codewords (0..255) in standard ECC200 order.
-        """
-        bits = (np.asarray(bits) & 1).astype(np.uint8)
-        numRows, numCols = bits.shape
-
-        read = np.zeros((numRows, numCols), dtype=bool)
-
-        def module(r, c):
-            # Wrap-around rules (ECC200)
-            if r < 0:
-                r += numRows
-                c += 4 - ((numRows + 4) % 8)
-            if c < 0:
-                c += numCols
-                r += 4 - ((numCols + 4) % 8)
-            r %= numRows
-            c %= numCols
-            read[r, c] = True
-            return int(bits[r, c])
-
-        def utah(r, c):
-            # 8 bits → one codeword
-            return [
-                module(r - 2, c - 2),
-                module(r - 2, c - 1),
-                module(r - 1, c - 2),
-                module(r - 1, c - 1),
-                module(r - 1, c),
-                module(r, c - 2),
-                module(r, c - 1),
-                module(r, c),
-            ]
-
-        def corner1():
-            return [
-                module(numRows - 1, 0),
-                module(numRows - 1, 1),
-                module(numRows - 1, 2),
-                module(0, numCols - 2),
-                module(0, numCols - 1),
-                module(1, numCols - 1),
-                module(2, numCols - 1),
-                module(3, numCols - 1),
-            ]
-
-        def corner2():
-            return [
-                module(numRows - 3, 0),
-                module(numRows - 2, 0),
-                module(numRows - 1, 0),
-                module(0, numCols - 4),
-                module(0, numCols - 3),
-                module(0, numCols - 2),
-                module(0, numCols - 1),
-                module(1, numCols - 1),
-            ]
-
-        def corner3():
-            return [
-                module(numRows - 3, 0),
-                module(numRows - 2, 0),
-                module(numRows - 1, 0),
-                module(0, numCols - 2),
-                module(0, numCols - 1),
-                module(1, numCols - 1),
-                module(2, numCols - 1),
-                module(3, numCols - 1),
-            ]
-
-        def corner4():
-            return [
-                module(numRows - 1, 0),
-                module(numRows - 1, numCols - 1),
-                module(0, numCols - 3),
-                module(0, numCols - 2),
-                module(0, numCols - 1),
-                module(1, numCols - 3),
-                module(1, numCols - 2),
-                module(1, numCols - 1),
-            ]
-
-        codewords = []
-
-        r, c = 4, 0
-        while (r < numRows) or (c < numCols):
-            # Corner cases
-            if r == numRows and c == 0:
-                bits8 = corner1()
-                codewords.append(self._bits_to_byte(bits8))
-            if r == numRows - 2 and c == 0 and (numCols % 4) != 0:
-                bits8 = corner2()
-                codewords.append(self._bits_to_byte(bits8))
-            if r == numRows - 2 and c == 0 and (numCols % 8) == 4:
-                bits8 = corner3()
-                codewords.append(self._bits_to_byte(bits8))
-            if r == numRows + 4 and c == 2 and (numCols % 8) == 0:
-                bits8 = corner4()
-                codewords.append(self._bits_to_byte(bits8))
-
-            # Sweep down-left
-            while r >= 0 and c < numCols:
-                if r < numRows and c >= 0 and not read[r, c]:
-                    codewords.append(self._bits_to_byte(utah(r, c)))
-                r -= 2
-                c += 2
-            r += 1
-            c += 3
-
-            # Sweep up-right
-            while r < numRows and c >= 0:
-                if r >= 0 and c < numCols and not read[r, c]:
-                    codewords.append(self._bits_to_byte(utah(r, c)))
-                r += 2
-                c -= 2
-            r += 3
-            c += 1
-
-        # Final fixed pattern (bottom-right), if not already read
-        if not read[numRows - 1, numCols - 1]:
-            # These two are the last bits in the stream
-            b1 = module(numRows - 1, numCols - 1)
-            b2 = module(numRows - 2, numCols - 2)
-            # Append them by creating a final byte if you track bitstream;
-            # in practice, many implementations have already consumed them via sweeps.
-            # So we don't force-add a codeword here.
-
-        return codewords
-
-    def _bits_to_byte(self, bits8):
-        v = 0
-        for b in bits8:
-            v = (v << 1) | (b & 1)
-        return v
