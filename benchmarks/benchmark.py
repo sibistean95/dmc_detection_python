@@ -90,6 +90,7 @@ def main():
         raw = {}
         for name in DECODER_NAMES:
             if name == "matrixvision":
+                print(f"config: {case.config}")
                 texts, dt = _run(lambda im: decode_dmc(im, case.config), img)
             elif name == "pylibdmtx":
                 texts, dt = _run(decode_pylibdmtx, img)

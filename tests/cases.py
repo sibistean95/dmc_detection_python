@@ -92,6 +92,8 @@ CASES = [
     Case("dmc_test_4.png", "350081004283911975", REAL),
     Case("dmc_test_5.png", "00003686754401016001--1829020134", REAL),
     Case("dmc_test_6.jpg", "Technomark", REAL),
+    Case("dmc_test_7.png", "Data Matrix Code Test Image Number 3", REAL),
+    Case("dmc_test_8.png", "15C06E115AZC72983004", SYNTHETIC_SMOOTH),
     Case("synthetic_image1.png", "DMC12345", SYNTHETIC_SMOOTH),
     Case("synthetic_image2.png", "DMC12345", SYNTHETIC_NOISY_TWO),
     Case("synthetic_image3.png", "DMC12345", SYNTHETIC_SMOOTH),

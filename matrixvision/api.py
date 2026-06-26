@@ -1,6 +1,6 @@
 import numpy as np
 
-from dm_detector import DetectionResult
+from matrixvision.data import DetectionResult
 from matrixvision.config import DetectorConfig, DecoderConfig
 from matrixvision.data import Decoded
 from matrixvision.debug import DebugSink, NullSink
